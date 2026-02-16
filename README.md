@@ -1,16 +1,20 @@
-# Mario-like Platformer
+# Mario-like Platformer - I Wanna Be The Guy Edition!
 
-A 2D side-scrolling platformer game built with Python and pygame, inspired by Super Mario Bros. 3.
+A 2D side-scrolling platformer with RIDICULOUS traps and hazards!
 
 ## Features
 
 - **3 Levels** with increasing difficulty
 - **Procedural Generation** - Each playthrough creates a unique level layout
-- **Enemies** - Goombas and Koopas with AI movement
-- **Collectibles** - Coins scattered throughout levels
-- **Synthesized Sound Effects** - Jump, coin, stomp, death, win sounds
-- **Game States** - Pause, Game Over, Level Complete, Victory
-- **No External Assets** - All graphics and audio generated programmatically
+- **Enemies** - Goombas, ANGRY Goombas, CRAZY Koopas!
+- **Collectibles** - Coins, BANANA PEELS, MYSTICAL FRUITS!
+- **Flying Hazards** - BATS that swoop down!
+- **Moving Platforms** - Blue platforms that move horizontally!
+- **TRAPS** - Spike strips, deadly orbs, X-shaped traps!
+- **FALLING SPIKES** - Spikes that fall from the sky!
+- **Spikes** - Floor spikes AND ceiling spikes!
+- **Synthesized Sound Effects**
+- **No External Assets**
 
 ## Controls
 
@@ -23,10 +27,11 @@ A 2D side-scrolling platformer game built with Python and pygame, inspired by Su
 
 ## Objective
 
-- Collect coins (+100 points)
-- Defeat enemies by jumping on them (+200 points)
-- Reach the flag at the end of each level (+1000 points)
-- Avoid spikes and pits
+- Collect coins (+50-100 points)
+- Collect fruits (+150 points)
+- Defeat enemies by jumping on them (+200-250 points)
+- Avoid ALL the traps!
+- Reach the flag at the end (+1000 points)
 - Complete all 3 levels to win!
 
 ## Installation
@@ -40,32 +45,6 @@ pip install pygame
 ```bash
 python mario_platformer.py
 ```
-
-## Level Design
-
-The game generates random levels with:
-
-- Ground platforms with pits to jump over
-- Pipes (various heights)
-- Floating brick platforms
-- Spikes as hazards
-- Coins and enemies placed strategically
-
-### Level Progression
-
-| Level | Width | Features |
-|-------|-------|----------|
-| 1 | 60 tiles | Basic obstacles, Goombas |
-| 2 | 80 tiles | Taller pipes, mixed enemies |
-| 3 | 100 tiles | Maximum challenge |
-
-## Game Mechanics
-
-- **Player**: Red character with jump and run animations
-- **Goomba**: Brown enemy, moves back and forth
-- **Koopa**: Green enemy, faster movement
-- **Stomp enemies** from above to defeat them
-- **3 lives** per game
 
 ## Requirements
 
