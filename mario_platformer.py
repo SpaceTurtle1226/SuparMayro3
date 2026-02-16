@@ -30,7 +30,7 @@ TRAP_RED = (200, 0, 0)
 ANGRY_RED = (255, 0, 0)
 CRAZY_YELLOW = (255, 255, 0)
 
-SKIN_COLOR = (255, 220, 180)
+SKIN_COLOR = (230, 175, 79)  # #E6AF4F - Golden skin tone
 HAIR_COLOR = (100, 50, 0)
 SHIRT_COLOR = (50, 150, 250)
 PANTS_COLOR = (30, 30, 180)
@@ -42,6 +42,14 @@ ENEMY_RED = (200, 50, 50)
 ENEMY_CYAN = (50, 200, 200)
 BAT_BLACK = (30, 30, 30)
 BOSS_DARK = (50, 0, 0)
+GHOST_WHITE = (220, 220, 240)
+SLIME_GREEN = (50, 255, 100)
+FIRE_ORANGE = (255, 100, 0)
+ICE_CYAN = (150, 255, 255)
+TELEPORTER_PURPLE = (180, 50, 255)
+THIEF_BLUE = (50, 100, 255)
+ANNOYING_PINK = (255, 100, 200)
+SHIELDER_GRAY = (100, 100, 120)
 
 GRAVITY = 0.7
 JUMP_FORCE = -13
@@ -322,6 +330,381 @@ class Enemy:
         if self.type == 2:
             pygame.draw.line(surface, ANGRY_RED, (draw_x + 4, draw_y + 4), (draw_x + 12, draw_y + 8), 2)
             pygame.draw.line(surface, ANGRY_RED, (draw_x + 16, draw_y + 8), (draw_x + 24, draw_y + 4), 2)
+
+
+class Ghost:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 28, 32)
+        self.start_x = x
+        self.start_y = y
+        self.alive = True
+        self.timer = 0
+        self.phase = 0
+        self.speed = 1.5
+    
+    def update(self, player_rect):
+        if not self.alive:
+            return
+        self.timer += 1
+        
+        if player_rect:
+            dx = player_rect.centerx - self.rect.centerx
+            dy = player_rect.centery - self.rect.centery
+            dist = max(1, math.sqrt(dx*dx + dy*dy))
+            if dist < 200:
+                self.rect.x += (dx / dist) * self.speed
+                self.rect.y += (dy / dist) * self.speed
+        
+        self.phase = (self.timer // 10) % 2
+    
+    def draw(self, surface, camera_x):
+        if not self.alive:
+            return
+        draw_x = self.rect.x - camera_x
+        
+        body_color = GHOST_WHITE if self.phase == 0 else (200, 200, 220)
+        pygame.draw.ellipse(surface, body_color, (draw_x, self.rect.y, 28, 32))
+        pygame.draw.circle(surface, BLACK, (draw_x + 8, self.rect.y + 12), 4)
+        pygame.draw.circle(surface, BLACK, (draw_x + 20, self.rect.y + 12), 4)
+        pygame.draw.ellipse(surface, BLACK, (draw_x + 10, self.rect.y + 20, 8, 6))
+
+
+class Slime:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 32, 24)
+        self.start_y = y
+        self.alive = True
+        self.timer = 0
+        self.jump_timer = 0
+        self.vel_x = 1
+        self.vel_y = 0
+        self.direction = 1
+    
+    def update(self, tiles):
+        if not self.alive:
+            return
+        self.timer += 1
+        
+        if self.timer % 90 == 0:
+            self.vel_y = -8
+            self.direction *= -1
+        
+        self.vel_x = self.direction * 1.5
+        self.vel_y += 0.3
+        
+        self.rect.x += self.vel_x
+        self.rect.y += self.vel_y
+        
+        for tile in tiles:
+            if tile.type in (TILE_GROUND, TILE_BLOCK, TILE_PIPE, TILE_PIPE_TOP):
+                if self.rect.colliderect(tile.rect):
+                    if self.vel_y > 0:
+                        self.rect.bottom = tile.rect.top
+                        self.vel_y = 0
+                    elif self.vel_x > 0:
+                        self.rect.right = tile.rect.left
+                        self.direction = -1
+                    elif self.vel_x < 0:
+                        self.rect.left = tile.rect.right
+                        self.direction = 1
+    
+    def draw(self, surface, camera_x):
+        if not self.alive:
+            return
+        draw_x = self.rect.x - camera_x
+        wobble = int(4 * abs((self.timer % 20) / 10 - 1))
+        
+        pygame.draw.ellipse(surface, SLIME_GREEN, (draw_x, self.rect.y + wobble, 32, 24 - wobble))
+        pygame.draw.circle(surface, (30, 150, 60), (draw_x + 8, self.rect.y + 8), 3)
+        pygame.draw.circle(surface, (30, 150, 60), (draw_x + 24, self.rect.y + 8), 3)
+
+
+class Teleporter:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 28, 28)
+        self.start_pos = (x, y)
+        self.alive = True
+        self.timer = 0
+        self.teleport_timer = 0
+        self.visible = True
+        self.scale = 1.0
+        self.target_x = x
+        self.target_y = y
+        self.lerp_progress = 0
+    
+    def update(self, player_rect, tiles):
+        if not self.alive:
+            return
+        self.timer += 1
+        
+        if self.teleport_timer > 0:
+            self.teleport_timer -= 1
+            if self.teleport_timer == 15:
+                self.visible = False
+                self.scale = 0.1
+            elif self.teleport_timer == 5:
+                if player_rect:
+                    offset_x = random.choice([-150, -100, 100, 150])
+                    offset_y = random.choice([-80, -40, 40, 80])
+                    self.target_x = max(50, min(3800, player_rect.x + offset_x))
+                    self.target_y = max(50, min(500, player_rect.y + offset_y))
+                else:
+                    self.target_x = self.start_pos[0] + random.randint(-100, 100)
+                    self.target_y = self.start_pos[1] + random.randint(-50, 50)
+            elif self.teleport_timer < 5:
+                self.rect.x = self.target_x
+                self.rect.y = self.target_y
+                self.visible = True
+                self.scale = min(1.0, self.scale + 0.2)
+        elif self.timer % 120 == 0:
+            self.teleport_timer = 20
+    
+    def draw(self, surface, camera_x):
+        if not self.alive:
+            return
+        if not self.visible:
+            return
+        draw_x = self.rect.x - camera_x
+        size = int(28 * self.scale)
+        offset = (28 - size) // 2
+        
+        pygame.draw.ellipse(surface, TELEPORTER_PURPLE, (draw_x + offset, self.rect.y + offset, size, size))
+        if self.scale > 0.7:
+            pygame.draw.circle(surface, (100, 255, 100), (draw_x + 10, self.rect.y + 10), 4)
+            pygame.draw.circle(surface, (100, 255, 100), (draw_x + 18, self.rect.y + 10), 4)
+            pygame.draw.arc(surface, WHITE, (draw_x + 8, self.rect.y + 16, 12, 8), 0, 3.14, 2)
+
+
+class Thief:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 26, 26)
+        self.alive = True
+        self.timer = 0
+        self.steal_timer = 0
+        self.has_stolen = False
+        self.velocity_x = 0
+        self.velocity_y = 0
+        self.angle = 0
+    
+    def update(self, player_rect, coins):
+        if not self.alive:
+            return
+        self.timer += 1
+        self.angle += 0.2
+        dist = 1000
+        
+        if player_rect:
+            dx = player_rect.centerx - self.rect.centerx
+            dy = player_rect.centery - self.rect.centery
+            dist = max(1, math.sqrt(dx*dx + dy*dy))
+            
+            if dist < 200 and not self.has_stolen:
+                self.velocity_x += (dx / dist) * 0.3
+                self.velocity_y += (dy / dist) * 0.3
+            elif self.has_stolen:
+                self.velocity_x -= (dx / dist) * 0.5
+                self.velocity_y -= (dy / dist) * 0.5
+        
+        self.velocity_x *= 0.95
+        self.velocity_y *= 0.95
+        
+        self.rect.x += self.velocity_x
+        self.rect.y += self.velocity_y + int(3 * math.sin(self.angle))
+        
+        if self.steal_timer > 0:
+            self.steal_timer -= 1
+        
+        if dist < 40 and self.steal_timer == 0 and not self.has_stolen:
+            if coins:
+                for coin in coins:
+                    if not coin.collected:
+                        coin.collected = True
+                        self.has_stolen = True
+                        self.steal_timer = 180
+                        break
+        
+        if self.has_stolen and self.steal_timer < 150:
+            self.has_stolen = False
+    
+    def draw(self, surface, camera_x):
+        if not self.alive:
+            return
+        draw_x = self.rect.x - camera_x
+        wobble = int(2 * math.sin(self.angle * 2))
+        
+        pygame.draw.ellipse(surface, THIEF_BLUE, (draw_x, self.rect.y + wobble, 26, 26))
+        pygame.draw.circle(surface, WHITE, (draw_x + 8, self.rect.y + 8 + wobble), 3)
+        pygame.draw.circle(surface, WHITE, (draw_x + 18, self.rect.y + 8 + wobble), 3)
+        pygame.draw.circle(surface, BLACK, (draw_x + 8, self.rect.y + 8 + wobble), 1)
+        pygame.draw.circle(surface, BLACK, (draw_x + 18, self.rect.y + 8 + wobble), 1)
+        
+        if self.has_stolen:
+            pygame.draw.circle(surface, COIN_GOLD, (draw_x + 13, self.rect.y - 5 + wobble), 5)
+
+
+class Dodger:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 24, 24)
+        self.alive = True
+        self.timer = 0
+        self.dodge_cooldown = 0
+        self.velocity_x = 0
+        self.velocity_y = 0
+        self.dodge_x = 0
+        self.dodge_y = 0
+        self.dodging = False
+        self.trail = []
+    
+    def update(self, player_rect, bullets):
+        if not self.alive:
+            return
+        self.timer += 1
+        
+        self.trail.append((self.rect.x, self.rect.y))
+        if len(self.trail) > 5:
+            self.trail.pop(0)
+        
+        if self.dodge_cooldown > 0:
+            self.dodge_cooldown -= 1
+        
+        if not self.dodging:
+            if player_rect:
+                target_x = player_rect.x
+                self.velocity_x = 1.5 if self.rect.x < target_x else -1.5
+        
+        for bullet in bullets:
+            dx = bullet.rect.centerx - self.rect.centerx
+            dy = bullet.rect.centery - self.rect.centery
+            dist = math.sqrt(dx*dx + dy*dy)
+            
+            if dist < 100 and self.dodge_cooldown == 0 and not self.dodging:
+                self.dodging = True
+                self.dodge_cooldown = 60
+                self.dodge_x = -dy / dist * 8 if dist > 0 else 0
+                self.dodge_y = dx / dist * 8 if dist > 0 else 0
+                break
+        
+        if self.dodging:
+            self.rect.x += self.dodge_x
+            self.rect.y += self.dodge_y
+            self.dodge_x *= 0.9
+            self.dodge_y *= 0.9
+            if abs(self.dodge_x) < 0.5 and abs(self.dodge_y) < 0.5:
+                self.dodging = False
+        else:
+            self.rect.x += self.velocity_x
+            self.rect.y += int(2 * math.sin(self.timer * 0.1))
+    
+    def draw(self, surface, camera_x):
+        if not self.alive:
+            return
+        
+        for i, (tx, ty) in enumerate(self.trail):
+            alpha = i / len(self.trail)
+            size = int(20 * alpha)
+            color = (int(ANNOYING_PINK[0] * alpha), int(ANNOYING_PINK[1] * alpha), int(ANNOYING_PINK[2] * alpha))
+            offset = (24 - size) // 2
+            pygame.draw.ellipse(surface, color, (tx - camera_x + offset, ty + offset, size, size))
+        
+        draw_x = self.rect.x - camera_x
+        pygame.draw.ellipse(surface, ANNOYING_PINK, (draw_x, self.rect.y, 24, 24))
+        pygame.draw.circle(surface, (255, 255, 255), (draw_x + 7, self.rect.y + 8), 4)
+        pygame.draw.circle(surface, (255, 255, 255), (draw_x + 17, self.rect.y + 8), 4)
+        pygame.draw.circle(surface, (0, 0, 0), (draw_x + 8, self.rect.y + 9), 2)
+        pygame.draw.circle(surface, (0, 0, 0), (draw_x + 16, self.rect.y + 9), 2)
+
+
+class Shielder:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 32, 32)
+        self.alive = True
+        self.timer = 0
+        self.pulse = 0
+        self.angle = 0
+        self.shield_radius = 60
+    
+    def update(self, enemies, player_rect):
+        if not self.alive:
+            return
+        self.timer += 1
+        self.angle += 0.05
+        self.pulse = int(5 * math.sin(self.timer * 0.1))
+        
+        if player_rect:
+            dx = player_rect.centerx - self.rect.centerx
+            dy = player_rect.centery - self.rect.centery
+            dist = max(1, math.sqrt(dx*dx + dy*dy))
+            if dist > 150:
+                self.rect.x += (dx / dist) * 0.8
+                self.rect.y += (dy / dist) * 0.8
+    
+    def draw(self, surface, camera_x):
+        if not self.alive:
+            return
+        draw_x = self.rect.x - camera_x
+        
+        pygame.draw.circle(surface, (150, 150, 200, 100), (draw_x + 16, self.rect.y + 16), self.shield_radius + self.pulse, 3)
+        
+        for i in range(3):
+            angle = self.angle + i * 2.09
+            sx = draw_x + 16 + int(40 * math.cos(angle))
+            sy = self.rect.y + 16 + int(40 * math.sin(angle))
+            pygame.draw.circle(surface, (100, 200, 255), (sx, sy), 6)
+        
+        pygame.draw.rect(surface, SHIELDER_GRAY, (draw_x + 4, self.rect.y + 4, 24, 24))
+        pygame.draw.circle(surface, (100, 255, 100), (draw_x + 12, self.rect.y + 12), 4)
+        pygame.draw.circle(surface, (100, 255, 100), (draw_x + 20, self.rect.y + 12), 4)
+
+
+class Healer:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 26, 30)
+        self.alive = True
+        self.timer = 0
+        self.heal_timer = 0
+        self.bob_offset = 0
+        self.heal_beams = []
+    
+    def update(self, enemies):
+        if not self.alive:
+            return
+        self.timer += 1
+        self.bob_offset = int(4 * math.sin(self.timer * 0.08))
+        
+        if self.heal_timer > 0:
+            self.heal_timer -= 1
+        
+        self.heal_beams = []
+        if self.heal_timer == 0:
+            for enemy in enemies:
+                if enemy.alive and enemy != self:
+                    dx = enemy.rect.centerx - self.rect.centerx
+                    dy = enemy.rect.centery - self.rect.centery
+                    dist = math.sqrt(dx*dx + dy*dy)
+                    if dist < 120 and random.random() < 0.02:
+                        self.heal_timer = 90
+                        self.heal_beams.append((enemy.rect.centerx, enemy.rect.centery))
+                        break
+    
+    def draw(self, surface, camera_x):
+        if not self.alive:
+            return
+        draw_x = self.rect.x - camera_x
+        draw_y = self.rect.y + self.bob_offset
+        
+        for hx, hy in self.heal_beams:
+            pygame.draw.line(surface, (100, 255, 100), (draw_x + 13, draw_y + 15), (hx - camera_x, hy), 3)
+            pygame.draw.circle(surface, (100, 255, 100), (hx - camera_x, hy), 8)
+        
+        pygame.draw.ellipse(surface, (50, 200, 100), (draw_x, draw_y, 26, 30))
+        pygame.draw.circle(surface, WHITE, (draw_x + 8, draw_y + 10), 4)
+        pygame.draw.circle(surface, WHITE, (draw_x + 18, draw_y + 10), 4)
+        pygame.draw.line(surface, WHITE, (draw_x + 10, draw_y + 20), (draw_x + 16, draw_y + 20), 2)
+        
+        plus_pulse = abs(math.sin(self.timer * 0.1))
+        plus_size = int(8 + 4 * plus_pulse)
+        pygame.draw.line(surface, (255, 255, 255), (draw_x + 13 - plus_size//2, draw_y - 5), (draw_x + 13 + plus_size//2, draw_y - 5), 3)
+        pygame.draw.line(surface, (255, 255, 255), (draw_x + 13, draw_y - 5 - plus_size//2), (draw_x + 13, draw_y - 5 + plus_size//2), 3)
 
 
 class Bat:
@@ -617,13 +1000,13 @@ def generate_level(level_num, width_tiles=60, is_boss_level=False):
         coin_positions.append((random.randint(2, level_width - 3), random.randint(11, 13)))
     
     enemy_positions = []
-    for _ in range(5 + level_num * 2):
+    for _ in range(8 + level_num * 3):
         enemy_col = random.randint(5, level_width - 5)
         if map_data[ground_row][enemy_col] == TILE_GROUND:
             enemy_positions.append((enemy_col, ground_row - 1, random.randint(0, 5)))
     
     bat_positions = []
-    for _ in range(1 + level_num // 2):
+    for _ in range(3 + level_num):
         bat_positions.append((random.randint(10, level_width - 15) * TILE_SIZE, random.randint(3, 7) * TILE_SIZE))
     
     moving_platforms = []
@@ -640,6 +1023,36 @@ def generate_level(level_num, width_tiles=60, is_boss_level=False):
     for _ in range(1 + level_num):
         falling_spikes.append((random.randint(8, level_width - 8) * TILE_SIZE, -50))
     
+    ghost_positions = []
+    for _ in range(2 + level_num):
+        ghost_positions.append((random.randint(10, level_width - 15) * TILE_SIZE, random.randint(2, 6) * TILE_SIZE))
+    
+    slime_positions = []
+    for _ in range(2 + level_num):
+        slime_col = random.randint(5, level_width - 5)
+        if map_data[ground_row][slime_col] == TILE_GROUND:
+            slime_positions.append((slime_col * TILE_SIZE, (ground_row - 2) * TILE_SIZE))
+    
+    teleporter_positions = []
+    for _ in range(1 + level_num // 2):
+        teleporter_positions.append((random.randint(8, level_width - 10) * TILE_SIZE, random.randint(3, 8) * TILE_SIZE))
+    
+    thief_positions = []
+    for _ in range(1 + level_num // 3):
+        thief_positions.append((random.randint(10, level_width - 15) * TILE_SIZE, random.randint(4, 10) * TILE_SIZE))
+    
+    dodger_positions = []
+    for _ in range(2 + level_num // 2):
+        dodger_positions.append((random.randint(8, level_width - 10) * TILE_SIZE, random.randint(5, 12) * TILE_SIZE))
+    
+    shielder_positions = []
+    for _ in range(1 + level_num // 3):
+        shielder_positions.append((random.randint(12, level_width - 15) * TILE_SIZE, random.randint(6, 11) * TILE_SIZE))
+    
+    healer_positions = []
+    for _ in range(1 + level_num // 4):
+        healer_positions.append((random.randint(10, level_width - 12) * TILE_SIZE, random.randint(5, 10) * TILE_SIZE))
+    
     boss_door_x = level_width - 3
     
     return {
@@ -649,6 +1062,13 @@ def generate_level(level_num, width_tiles=60, is_boss_level=False):
         "coins": coin_positions,
         "enemies": enemy_positions,
         "bats": bat_positions,
+        "ghosts": ghost_positions,
+        "slimes": slime_positions,
+        "teleporters": teleporter_positions,
+        "thieves": thief_positions,
+        "dodgers": dodger_positions,
+        "shielders": shielder_positions,
+        "healers": healer_positions,
         "moving_platforms": moving_platforms,
         "traps": trap_positions,
         "falling_spikes": falling_spikes,
@@ -665,6 +1085,58 @@ for i in range(1, 11):
     LEVELS[i] = generate_level(i, width, is_boss)
 
 
+class Particle:
+    def __init__(self, x, y, color, velocity, lifetime):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.vel_x, self.vel_y = velocity
+        self.lifetime = lifetime
+        self.max_lifetime = lifetime
+    
+    def update(self):
+        self.x += self.vel_x
+        self.y += self.vel_y
+        self.vel_y += 0.2
+        self.lifetime -= 1
+    
+    def draw(self, surface, camera_x):
+        alpha = self.lifetime / self.max_lifetime
+        size = max(2, int(6 * alpha))
+        color = tuple(int(c * alpha) for c in self.color)
+        pygame.draw.circle(surface, color, (int(self.x - camera_x), int(self.y)), size)
+
+
+class PowerUp:
+    def __init__(self, x, y, power_type):
+        self.rect = pygame.Rect(x, y, 24, 24)
+        self.type = power_type
+        self.collected = False
+        self.anim_timer = 0
+        self.bob_offset = 0
+    
+    def update(self):
+        self.anim_timer += 1
+        self.bob_offset = int(4 * math.sin(self.anim_timer * 0.1))
+    
+    def draw(self, surface, camera_x):
+        if self.collected:
+            return
+        draw_x = self.rect.x - camera_x
+        draw_y = self.rect.y + self.bob_offset
+        
+        if self.type == 0:
+            pygame.draw.circle(surface, (255, 50, 50), (draw_x + 12, draw_y + 12), 12)
+            pygame.draw.rect(surface, WHITE, (draw_x + 8, draw_y + 6, 8, 4))
+            pygame.draw.rect(surface, WHITE, (draw_x + 10, draw_y + 4, 4, 8))
+        elif self.type == 1:
+            pygame.draw.circle(surface, (50, 150, 255), (draw_x + 12, draw_y + 12), 12)
+            pygame.draw.polygon(surface, WHITE, [(draw_x + 12, draw_y + 4), (draw_x + 16, draw_y + 14), (draw_x + 6, draw_y + 10), (draw_x + 18, draw_y + 10), (draw_x + 8, draw_y + 14)])
+        elif self.type == 2:
+            pygame.draw.circle(surface, (255, 215, 0), (draw_x + 12, draw_y + 12), 12)
+            pygame.draw.rect(surface, BLACK, (draw_x + 10, draw_y + 6, 4, 12))
+
+
 class Level:
     def __init__(self, level_num):
         self.level_num = level_num
@@ -676,9 +1148,18 @@ class Level:
         self.coins = []
         self.enemies = []
         self.bats = []
+        self.ghosts = []
+        self.slimes = []
+        self.teleporters = []
+        self.thieves = []
+        self.dodgers = []
+        self.shielders = []
+        self.healers = []
         self.moving_platforms = []
         self.traps = []
         self.falling_spikes = []
+        self.powerups = []
+        self.particles = []
         self.boss = None
         
         self.load_level()
@@ -702,6 +1183,27 @@ class Level:
         for x, y in self.data.get("bats", []):
             self.bats.append(Bat(x, y))
         
+        for x, y in self.data.get("ghosts", []):
+            self.ghosts.append(Ghost(x, y))
+        
+        for x, y in self.data.get("slimes", []):
+            self.slimes.append(Slime(x, y))
+        
+        for x, y in self.data.get("teleporters", []):
+            self.teleporters.append(Teleporter(x, y))
+        
+        for x, y in self.data.get("thieves", []):
+            self.thieves.append(Thief(x, y))
+        
+        for x, y in self.data.get("dodgers", []):
+            self.dodgers.append(Dodger(x, y))
+        
+        for x, y in self.data.get("shielders", []):
+            self.shielders.append(Shielder(x, y))
+        
+        for x, y in self.data.get("healers", []):
+            self.healers.append(Healer(x, y))
+        
         for x, y, w in self.data.get("moving_platforms", []):
             self.moving_platforms.append(MovingPlatform(x, y, w))
         
@@ -711,22 +1213,47 @@ class Level:
         for x, y in self.data.get("falling_spikes", []):
             self.falling_spikes.append(FallingSpike(x, y))
         
+        for _ in range(2 + self.level_num // 2):
+            x = random.randint(10, len(self.data["map"][0]) - 10) * TILE_SIZE
+            y = random.randint(3, 10) * TILE_SIZE
+            self.powerups.append(PowerUp(x, y, random.randint(0, 2)))
+        
         if self.data.get("is_boss_level") and self.data.get("boss_type") is not None:
             self.boss = Boss(500, 10 * TILE_SIZE - 80, self.data["boss_type"])
     
-    def update(self):
+    def update(self, player_rect=None):
         for coin in self.coins:
             coin.update()
         for enemy in self.enemies:
             enemy.update(self.tile_rects)
         for bat in self.bats:
             bat.update()
+        for ghost in self.ghosts:
+            ghost.update(player_rect)
+        for slime in self.slimes:
+            slime.update(self.tile_rects)
+        for teleporter in self.teleporters:
+            teleporter.update(player_rect, self.tile_rects)
+        for thief in self.thieves:
+            thief.update(player_rect, self.coins)
+        for dodger in self.dodgers:
+            dodger.update(player_rect, [])
+        for shielder in self.shielders:
+            shielder.update(self.enemies, player_rect)
+        for healer in self.healers:
+            healer.update(self.enemies)
         for platform in self.moving_platforms:
             platform.update()
         for trap in self.traps:
             pass
         for spike in self.falling_spikes:
             spike.update()
+        for powerup in self.powerups:
+            powerup.update()
+        for particle in self.particles[:]:
+            particle.update()
+            if particle.lifetime <= 0:
+                self.particles.remove(particle)
         if self.boss and self.boss.alive:
             self.boss.update(self.tile_rects[0].rect if self.tile_rects else None, self.tile_rects)
     
@@ -743,17 +1270,44 @@ class Level:
         for bat in self.bats:
             bat.draw(surface, camera_x)
         
+        for ghost in self.ghosts:
+            ghost.draw(surface, camera_x)
+        
+        for slime in self.slimes:
+            slime.draw(surface, camera_x)
+        
+        for teleporter in self.teleporters:
+            teleporter.draw(surface, camera_x)
+        
+        for thief in self.thieves:
+            thief.draw(surface, camera_x)
+        
+        for dodger in self.dodgers:
+            dodger.draw(surface, camera_x)
+        
+        for shielder in self.shielders:
+            shielder.draw(surface, camera_x)
+        
+        for healer in self.healers:
+            healer.draw(surface, camera_x)
+        
         for trap in self.traps:
             trap.draw(surface, camera_x)
         
         for spike in self.falling_spikes:
             spike.draw(surface, camera_x)
         
+        for powerup in self.powerups:
+            powerup.draw(surface, camera_x)
+        
         for enemy in self.enemies:
             enemy.draw(surface, camera_x)
         
         if self.boss:
             self.boss.draw(surface, camera_x)
+        
+        for particle in self.particles:
+            particle.draw(surface, camera_x)
 
 
 class MusicPlayer:
@@ -865,6 +1419,14 @@ class Game:
         
         self.music = MusicPlayer()
         
+        self.shake_timer = 0
+        self.shake_intensity = 0
+        self.combo_count = 0
+        self.combo_timer = 0
+        self.invincible_timer = 0
+        self.rapid_fire_timer = 0
+        self.magnet_active = False
+        
         self.reset_game()
     
     def reset_game(self):
@@ -876,6 +1438,29 @@ class Game:
         self.camera_x = 0
         self.state = STATE_PLAYING
         self.level_width = len(self.level.data["map"][0]) * TILE_SIZE
+        self.shake_timer = 0
+        self.combo_count = 0
+        self.combo_timer = 0
+        self.invincible_timer = 0
+        self.rapid_fire_timer = 0
+        self.magnet_active = False
+    
+    def add_shake(self, intensity, duration):
+        self.shake_intensity = max(self.shake_intensity, intensity)
+        self.shake_timer = max(self.shake_timer, duration)
+    
+    def spawn_particles(self, x, y, color, count=8):
+        for _ in range(count):
+            vel_x = random.uniform(-3, 3)
+            vel_y = random.uniform(-5, -2)
+            lifetime = random.randint(20, 40)
+            self.level.particles.append(Particle(x, y, color, (vel_x, vel_y), lifetime))
+    
+    def add_combo(self):
+        self.combo_count += 1
+        self.combo_timer = 120
+        bonus = min(self.combo_count * 10, 100)
+        self.player.score += bonus
     
     def next_level(self):
         if self.current_level < self.max_levels:
@@ -893,6 +1478,22 @@ class Game:
         if self.state != STATE_PLAYING:
             return
         
+        if self.shake_timer > 0:
+            self.shake_timer -= 1
+            self.shake_intensity = max(0, self.shake_intensity - 1)
+        
+        if self.invincible_timer > 0:
+            self.invincible_timer -= 1
+        
+        if self.rapid_fire_timer > 0:
+            self.rapid_fire_timer -= 1
+            self.player.shoot_cooldown = max(0, self.player.shoot_cooldown - 1)
+        
+        if self.combo_timer > 0:
+            self.combo_timer -= 1
+        elif self.combo_count > 0:
+            self.combo_count = 0
+        
         keys = pygame.key.get_pressed()
         
         if keys[pygame.K_z] or keys[pygame.K_x]:
@@ -905,15 +1506,46 @@ class Game:
         self.player.update(keys, self.level.tile_rects, self.level.moving_platforms)
         
         target_camera_x = self.player.rect.x - SCREEN_WIDTH // 3
-        self.camera_x = max(0, min(target_camera_x, self.level_width - SCREEN_WIDTH))
+        shake_x = random.randint(-self.shake_intensity, self.shake_intensity) if self.shake_timer > 0 else 0
+        shake_y = random.randint(-self.shake_intensity, self.shake_intensity) if self.shake_timer > 0 else 0
         
-        self.level.update()
+        camera_lerp = 0.15
+        self.camera_x = self.camera_x + (target_camera_x - self.camera_x) * camera_lerp
+        self.camera_x = max(0, min(self.camera_x + shake_x, self.level_width - SCREEN_WIDTH))
+        
+        self.level.update(self.player.rect)
+        
+        if self.magnet_active:
+            for coin in self.level.coins:
+                if not coin.collected:
+                    dx = self.player.rect.centerx - coin.rect.centerx
+                    dy = self.player.rect.centery - coin.rect.centery
+                    dist = max(1, math.sqrt(dx*dx + dy*dy))
+                    if dist < 150:
+                        coin.rect.x += (dx / dist) * 5
+                        coin.rect.y += (dy / dist) * 5
         
         for coin in self.level.coins:
             if not coin.collected and self.player.rect.colliderect(coin.rect):
                 coin.collected = True
                 self.player.score += 100
                 self.music.play_coin()
+                self.spawn_particles(coin.rect.centerx, coin.rect.centery, COIN_GOLD, 5)
+        
+        for powerup in self.level.powerups[:]:
+            if not powerup.collected and self.player.rect.colliderect(powerup.rect):
+                powerup.collected = True
+                self.level.powerups.remove(powerup)
+                self.music.play_coin()
+                if powerup.type == 0:
+                    self.player.lives = min(self.player.lives + 1, 10)
+                    self.spawn_particles(powerup.rect.centerx, powerup.rect.centery, (255, 50, 50), 10)
+                elif powerup.type == 1:
+                    self.rapid_fire_timer = 600
+                    self.spawn_particles(powerup.rect.centerx, powerup.rect.centery, (50, 150, 255), 10)
+                elif powerup.type == 2:
+                    self.invincible_timer = 300
+                    self.spawn_particles(powerup.rect.centerx, powerup.rect.centery, (255, 215, 0), 10)
         
         for enemy in self.level.enemies:
             if not enemy.alive:
@@ -924,7 +1556,10 @@ class Game:
                     self.player.vel_y = JUMP_FORCE // 2
                     self.player.score += 200
                     self.music.play_hit()
-                else:
+                    self.add_combo()
+                    self.add_shake(3, 5)
+                    self.spawn_particles(enemy.rect.centerx, enemy.rect.centery, enemy.color, 10)
+                elif self.invincible_timer <= 0:
                     self.player_died()
         
         for bat in self.level.bats:
@@ -934,7 +1569,101 @@ class Game:
                     self.player.vel_y = JUMP_FORCE // 2
                     self.player.score += 250
                     self.music.play_hit()
-                else:
+                    self.add_combo()
+                    self.add_shake(3, 5)
+                    self.spawn_particles(bat.rect.centerx, bat.rect.centery, BAT_BLACK, 10)
+                elif self.invincible_timer <= 0:
+                    self.player_died()
+        
+        for ghost in self.level.ghosts:
+            if ghost.alive and self.player.rect.colliderect(ghost.rect):
+                if self.player.vel_y > 0 and self.player.rect.bottom < ghost.rect.centery:
+                    ghost.alive = False
+                    self.player.vel_y = JUMP_FORCE // 2
+                    self.player.score += 300
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(4, 5)
+                    self.spawn_particles(ghost.rect.centerx, ghost.rect.centery, GHOST_WHITE, 12)
+                elif self.invincible_timer <= 0:
+                    self.player_died()
+        
+        for slime in self.level.slimes:
+            if slime.alive and self.player.rect.colliderect(slime.rect):
+                if self.player.vel_y > 0 and self.player.rect.bottom < slime.rect.centery:
+                    slime.alive = False
+                    self.player.vel_y = JUMP_FORCE // 2
+                    self.player.score += 350
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(4, 5)
+                    self.spawn_particles(slime.rect.centerx, slime.rect.centery, SLIME_GREEN, 12)
+                elif self.invincible_timer <= 0:
+                    self.player_died()
+        
+        for teleporter in self.level.teleporters:
+            if teleporter.alive and self.player.rect.colliderect(teleporter.rect):
+                if self.player.vel_y > 0 and self.player.rect.bottom < teleporter.rect.centery:
+                    teleporter.alive = False
+                    self.player.vel_y = JUMP_FORCE // 2
+                    self.player.score += 400
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(5, 8)
+                    self.spawn_particles(teleporter.rect.centerx, teleporter.rect.centery, TELEPORTER_PURPLE, 15)
+                elif self.invincible_timer <= 0:
+                    self.player_died()
+        
+        for thief in self.level.thieves:
+            if thief.alive and self.player.rect.colliderect(thief.rect):
+                if self.player.vel_y > 0 and self.player.rect.bottom < thief.rect.centery:
+                    thief.alive = False
+                    self.player.vel_y = JUMP_FORCE // 2
+                    self.player.score += 500
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(4, 6)
+                    self.spawn_particles(thief.rect.centerx, thief.rect.centery, THIEF_BLUE, 12)
+                elif self.invincible_timer <= 0:
+                    self.player_died()
+        
+        for dodger in self.level.dodgers:
+            if dodger.alive and self.player.rect.colliderect(dodger.rect):
+                if self.player.vel_y > 0 and self.player.rect.bottom < dodger.rect.centery:
+                    dodger.alive = False
+                    self.player.vel_y = JUMP_FORCE // 2
+                    self.player.score += 450
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(4, 6)
+                    self.spawn_particles(dodger.rect.centerx, dodger.rect.centery, ANNOYING_PINK, 12)
+                elif self.invincible_timer <= 0:
+                    self.player_died()
+        
+        for shielder in self.level.shielders:
+            if shielder.alive and self.player.rect.colliderect(shielder.rect):
+                if self.player.vel_y > 0 and self.player.rect.bottom < shielder.rect.centery:
+                    shielder.alive = False
+                    self.player.vel_y = JUMP_FORCE // 2
+                    self.player.score += 600
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(6, 10)
+                    self.spawn_particles(shielder.rect.centerx, shielder.rect.centery, SHIELDER_GRAY, 15)
+                elif self.invincible_timer <= 0:
+                    self.player_died()
+        
+        for healer in self.level.healers:
+            if healer.alive and self.player.rect.colliderect(healer.rect):
+                if self.player.vel_y > 0 and self.player.rect.bottom < healer.rect.centery:
+                    healer.alive = False
+                    self.player.vel_y = JUMP_FORCE // 2
+                    self.player.score += 550
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(5, 8)
+                    self.spawn_particles(healer.rect.centerx, healer.rect.centery, (50, 200, 100), 15)
+                elif self.invincible_timer <= 0:
                     self.player_died()
         
         for bullet in self.player.bullets[:]:
@@ -943,36 +1672,113 @@ class Game:
                     enemy.alive = False
                     self.player.score += 200
                     self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(2, 3)
+                    self.spawn_particles(enemy.rect.centerx, enemy.rect.centery, enemy.color, 8)
                     if bullet in self.player.bullets:
                         self.player.bullets.remove(bullet)
+                    break
             
             if self.level.boss and self.level.boss.alive and bullet.rect.colliderect(self.level.boss.rect):
                 self.level.boss.take_damage()
                 self.player.score += 100
                 self.music.play_boss_hit()
+                self.add_shake(5, 8)
+                self.spawn_particles(bullet.rect.centerx, bullet.rect.centery, ANGRY_RED, 6)
                 if bullet in self.player.bullets:
                     self.player.bullets.remove(bullet)
+            
+            for teleporter in self.level.teleporters:
+                if teleporter.alive and bullet.rect.colliderect(teleporter.rect):
+                    teleporter.alive = False
+                    self.player.score += 400
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(3, 4)
+                    self.spawn_particles(teleporter.rect.centerx, teleporter.rect.centery, TELEPORTER_PURPLE, 10)
+                    if bullet in self.player.bullets:
+                        self.player.bullets.remove(bullet)
+                    break
+            
+            for thief in self.level.thieves:
+                if thief.alive and bullet.rect.colliderect(thief.rect):
+                    thief.alive = False
+                    self.player.score += 500
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(3, 4)
+                    self.spawn_particles(thief.rect.centerx, thief.rect.centery, THIEF_BLUE, 10)
+                    if bullet in self.player.bullets:
+                        self.player.bullets.remove(bullet)
+                    break
+            
+            for dodger in self.level.dodgers:
+                if dodger.alive and bullet.rect.colliderect(dodger.rect):
+                    if random.random() < 0.3:
+                        dodger.alive = False
+                        self.player.score += 450
+                        self.music.play_hit()
+                        self.add_combo()
+                        self.add_shake(3, 4)
+                        self.spawn_particles(dodger.rect.centerx, dodger.rect.centery, ANNOYING_PINK, 10)
+                        if bullet in self.player.bullets:
+                            self.player.bullets.remove(bullet)
+                    break
+            
+            for shielder in self.level.shielders:
+                if shielder.alive and bullet.rect.colliderect(shielder.rect):
+                    shielder.alive = False
+                    self.player.score += 600
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(4, 6)
+                    self.spawn_particles(shielder.rect.centerx, shielder.rect.centery, SHIELDER_GRAY, 12)
+                    if bullet in self.player.bullets:
+                        self.player.bullets.remove(bullet)
+                    break
+            
+            for healer in self.level.healers:
+                if healer.alive and bullet.rect.colliderect(healer.rect):
+                    healer.alive = False
+                    self.player.score += 550
+                    self.music.play_hit()
+                    self.add_combo()
+                    self.add_shake(4, 5)
+                    self.spawn_particles(healer.rect.centerx, healer.rect.centery, (50, 200, 100), 12)
+                    if bullet in self.player.bullets:
+                        self.player.bullets.remove(bullet)
+                    break
         
         if self.level.boss and self.level.boss.alive:
-            if self.player.rect.colliderect(self.level.boss.rect):
+            if self.player.rect.colliderect(self.level.boss.rect) and self.invincible_timer <= 0:
                 self.player_died()
             
             if not self.level.boss.alive:
                 self.player.score += 5000
+                self.add_shake(15, 30)
+                for _ in range(5):
+                    self.spawn_particles(
+                        self.level.boss.rect.centerx + random.randint(-30, 30),
+                        self.level.boss.rect.centery + random.randint(-30, 30),
+                        self.level.boss.color, 15
+                    )
                 self.music.play_win()
                 self.next_level()
         
         for tile in self.level.tiles:
             if tile.type in (TILE_SPIKE, TILE_SPIKE_UP) and self.player.rect.colliderect(tile.rect):
-                self.player_died()
+                if self.invincible_timer <= 0:
+                    self.player_died()
         
         for trap in self.level.traps:
             if self.player.rect.colliderect(trap.rect):
-                self.player_died()
+                if self.invincible_timer <= 0:
+                    self.player_died()
         
         for spike in self.level.falling_spikes:
             if self.player.rect.colliderect(spike.rect):
-                self.player_died()
+                if self.invincible_timer <= 0:
+                    self.player_died()
         
         if self.player.rect.y > SCREEN_HEIGHT:
             self.player_died()
@@ -1021,7 +1827,12 @@ class Game:
     
     def player_died(self):
         self.music.play_death()
+        self.add_shake(10, 20)
+        self.spawn_particles(self.player.rect.centerx, self.player.rect.centery, SKIN_COLOR, 20)
         self.player.lives -= 1
+        self.combo_count = 0
+        self.invincible_timer = 0
+        self.rapid_fire_timer = 0
         if self.player.lives <= 0:
             self.state = STATE_GAME_OVER
         else:
@@ -1051,6 +1862,21 @@ class Game:
         if self.state == STATE_BOSS and self.level.boss:
             boss_text = self.large_font.render(self.level.boss.name, True, TRAP_RED)
             self.screen.blit(boss_text, (SCREEN_WIDTH // 2 - 150, 50))
+        
+        if self.combo_count > 1:
+            combo_color = (255, 255 - min(self.combo_count * 20, 200), 0)
+            combo_text = self.font.render(f"COMBO x{self.combo_count}!", True, combo_color)
+            combo_y = 50 + int(5 * math.sin(pygame.time.get_ticks() * 0.01))
+            self.screen.blit(combo_text, (SCREEN_WIDTH // 2 - 80, combo_y))
+        
+        powerup_y = 50
+        if self.invincible_timer > 0:
+            shield_text = self.small_font.render(f"SHIELD: {self.invincible_timer // 60}s", True, (255, 215, 0))
+            self.screen.blit(shield_text, (SCREEN_WIDTH - 150, powerup_y))
+            powerup_y += 25
+        if self.rapid_fire_timer > 0:
+            rapid_text = self.small_font.render(f"RAPID: {self.rapid_fire_timer // 60}s", True, (50, 150, 255))
+            self.screen.blit(rapid_text, (SCREEN_WIDTH - 150, powerup_y))
         
         controls_text = self.small_font.render("ARROWS: Move | SPACE: Jump | Z/X: Shoot | P: Pause", True, BLACK)
         self.screen.blit(controls_text, (10, SCREEN_HEIGHT - 30))
