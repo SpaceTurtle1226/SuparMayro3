@@ -74,6 +74,7 @@ STATE_GAME_OVER = 1
 STATE_WIN = 2
 STATE_PAUSED = 3
 STATE_BOSS = 4
+STATE_CHAT = 5
 
 
 class Player:
@@ -1427,6 +1428,10 @@ class Game:
         self.rapid_fire_timer = 0
         self.magnet_active = False
         
+        self.chat_text = ""
+        self.chat_active = False
+        self.chat_history = []
+        
         self.reset_game()
     
     def reset_game(self):
@@ -1496,14 +1501,17 @@ class Game:
         
         keys = pygame.key.get_pressed()
         
-        if keys[pygame.K_z] or keys[pygame.K_x]:
-            self.player.shoot()
-            if not getattr(self, 'shoot_key_held', False):
-                self.music.play_shoot()
-                self.shoot_key_held = True
+        if not self.chat_active:
+            if keys[pygame.K_z] or keys[pygame.K_x]:
+                self.player.shoot()
+                if not getattr(self, 'shoot_key_held', False):
+                    self.music.play_shoot()
+                    self.shoot_key_held = True
+            else:
+                self.shoot_key_held = False        
+            self.player.update(keys, self.level.tile_rects, self.level.moving_platforms)
         else:
-            self.shoot_key_held = False        
-        self.player.update(keys, self.level.tile_rects, self.level.moving_platforms)
+            self.player.vel_x = 0
         
         target_camera_x = self.player.rect.x - SCREEN_WIDTH // 3
         shake_x = random.randint(-self.shake_intensity, self.shake_intensity) if self.shake_timer > 0 else 0
@@ -1794,10 +1802,13 @@ class Game:
     def update_boss(self):
         keys = pygame.key.get_pressed()
         
-        if keys[pygame.K_z] or keys[pygame.K_x]:
-            self.player.shoot()
-        
-        self.player.update(keys, self.level.tile_rects, [])
+        if not self.chat_active:
+            if keys[pygame.K_z] or keys[pygame.K_x]:
+                self.player.shoot()
+            
+            self.player.update(keys, self.level.tile_rects, [])
+        else:
+            self.player.vel_x = 0
         
         self.level.update()
         
@@ -1878,7 +1889,27 @@ class Game:
             rapid_text = self.small_font.render(f"RAPID: {self.rapid_fire_timer // 60}s", True, (50, 150, 255))
             self.screen.blit(rapid_text, (SCREEN_WIDTH - 150, powerup_y))
         
-        controls_text = self.small_font.render("ARROWS: Move | SPACE: Jump | Z/X: Shoot | P: Pause", True, BLACK)
+        if self.chat_active:
+            chat_bg = pygame.Surface((SCREEN_WIDTH - 40, 40), pygame.SRCALPHA)
+            chat_bg.fill((0, 0, 0, 180))
+            self.screen.blit(chat_bg, (20, SCREEN_HEIGHT - 60))
+            chat_prompt = self.font.render("> " + self.chat_text, True, WHITE)
+            self.screen.blit(chat_prompt, (30, SCREEN_HEIGHT - 55))
+            if pygame.time.get_ticks() % 1000 < 500:
+                cursor_x = 30 + chat_prompt.get_width()
+                pygame.draw.line(self.screen, WHITE, (cursor_x, SCREEN_HEIGHT - 55), (cursor_x, SCREEN_HEIGHT - 30), 2)
+        
+        if len(self.chat_history) > 0:
+            y_offset = SCREEN_HEIGHT - 100
+            for msg in self.chat_history[-3:]:
+                chat_msg = self.small_font.render(msg, True, (220, 220, 220))
+                msg_bg = pygame.Surface((chat_msg.get_width() + 10, chat_msg.get_height() + 4), pygame.SRCALPHA)
+                msg_bg.fill((0, 0, 0, 120))
+                self.screen.blit(msg_bg, (20, y_offset))
+                self.screen.blit(chat_msg, (25, y_offset + 2))
+                y_offset -= 25
+        
+        controls_text = self.small_font.render("ARROWS: Move | SPACE: Jump | Z/X: Shoot | P: Pause | T: Chat", True, BLACK)
         self.screen.blit(controls_text, (10, SCREEN_HEIGHT - 30))
         
         if self.state == STATE_PAUSED:
@@ -1916,16 +1947,35 @@ class Game:
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_p and self.state == STATE_PLAYING:
-                        self.state = STATE_PAUSED
-                    elif event.key == pygame.K_p and self.state == STATE_PAUSED:
-                        self.state = STATE_PLAYING
-                    elif event.key == pygame.K_r and self.state in (STATE_GAME_OVER, STATE_WIN):
-                        self.current_level = 1
-                        self.reset_game()
-                    elif event.key == pygame.K_SPACE or event.key == pygame.K_w:
-                        if self.state == STATE_PLAYING and self.player.on_ground:
-                            self.music.play_jump()
+                    if self.chat_active:
+                        if event.key == pygame.K_RETURN:
+                            if self.chat_text.strip():
+                                self.chat_history.append(self.chat_text)
+                                if len(self.chat_history) > 5:
+                                    self.chat_history.pop(0)
+                            self.chat_text = ""
+                            self.chat_active = False
+                        elif event.key == pygame.K_ESCAPE:
+                            self.chat_text = ""
+                            self.chat_active = False
+                        elif event.key == pygame.K_BACKSPACE:
+                            self.chat_text = self.chat_text[:-1]
+                        elif event.unicode and event.unicode.isprintable():
+                            self.chat_text += event.unicode
+                    else:
+                        if event.key == pygame.K_t and self.state == STATE_PLAYING:
+                            self.chat_active = True
+                            self.chat_text = ""
+                        elif event.key == pygame.K_p and self.state == STATE_PLAYING:
+                            self.state = STATE_PAUSED
+                        elif event.key == pygame.K_p and self.state == STATE_PAUSED:
+                            self.state = STATE_PLAYING
+                        elif event.key == pygame.K_r and self.state in (STATE_GAME_OVER, STATE_WIN):
+                            self.current_level = 1
+                            self.reset_game()
+                        elif event.key == pygame.K_SPACE or event.key == pygame.K_w:
+                            if self.state == STATE_PLAYING and self.player.on_ground and not self.chat_active:
+                                self.music.play_jump()
             
             self.update()
             self.draw()
