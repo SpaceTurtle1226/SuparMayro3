@@ -1,11 +1,12 @@
 """
-Mario-like Platformer Game - I Wanna Be The Guy Edition!
-A 2D side-scrolling platformer with RIDICULOUS traps and hazards
+SUPAR MAYRO - Ultimate Platformer
+Boss battles, weapons, double jump, and more!
 """
 
 import pygame
 import sys
 import random
+import math
 import array
 
 SCREEN_WIDTH = 800
@@ -19,31 +20,35 @@ SKY_BLUE = (107, 140, 255)
 GROUND_BROWN = (139, 69, 19)
 BRICK_COLOR = (185, 122, 87)
 PIPE_GREEN = (34, 177, 76)
-PLAYER_RED = (237, 28, 36)
-ENEMY_BROWN = (160, 100, 50)
-ENEMY_PURPLE = (150, 50, 150)
-ENEMY_ORANGE = (255, 140, 0)
 COIN_GOLD = (255, 215, 0)
 SPIKE_GRAY = (128, 128, 128)
 TEXT_COLOR = (255, 255, 255)
 FLAG_RED = (220, 20, 60)
 FLAG_POLE = (200, 200, 200)
-ANGRY_RED = (255, 0, 0)
-CRAZY_YELLOW = (255, 255, 0)
-FRUIT_RED = (255, 50, 50)
-FRUIT_ORANGE = (255, 165, 0)
-FRUIT_GREEN = (50, 205, 50)
-BAT_BLACK = (30, 30, 30)
 PLATFORM_BLUE = (70, 130, 180)
 TRAP_RED = (200, 0, 0)
-TRAP_DARK = (100, 0, 0)
-TRAP_ORANGE = (255, 100, 0)
+ANGRY_RED = (255, 0, 0)
+CRAZY_YELLOW = (255, 255, 0)
 
-GRAVITY = 0.8
-JUMP_FORCE = -14
+SKIN_COLOR = (255, 220, 180)
+HAIR_COLOR = (100, 50, 0)
+SHIRT_COLOR = (50, 150, 250)
+PANTS_COLOR = (30, 30, 180)
+ENEMY_BROWN = (160, 100, 50)
+ENEMY_GREEN = (50, 150, 50)
+ENEMY_PURPLE = (150, 50, 150)
+ENEMY_ORANGE = (255, 140, 0)
+ENEMY_RED = (200, 50, 50)
+ENEMY_CYAN = (50, 200, 200)
+BAT_BLACK = (30, 30, 30)
+BOSS_DARK = (50, 0, 0)
+
+GRAVITY = 0.7
+JUMP_FORCE = -13
 PLAYER_SPEED = 5
 ENEMY_SPEED = 2
 MAX_FALL_SPEED = 12
+DOUBLE_JUMP_FORCE = -11
 
 TILE_EMPTY = 0
 TILE_GROUND = 1
@@ -54,41 +59,39 @@ TILE_SPIKE = 5
 TILE_FLAG = 6
 TILE_SPIKE_UP = 7
 TILE_PLATFORM_MOVING = 8
+TILE_BOSS_DOOR = 9
 
 STATE_PLAYING = 0
 STATE_GAME_OVER = 1
 STATE_WIN = 2
 STATE_PAUSED = 3
+STATE_BOSS = 4
 
 
-class Player(pygame.sprite.Sprite):
+class Player:
     def __init__(self, x, y):
-        super().__init__()
-        self.width = 28
+        self.width = 24
         self.height = 32
-        
-        self.image = pygame.Surface((self.width, self.height))
-        self.image.fill(PLAYER_RED)
-        pygame.draw.rect(self.image, BLACK, (4, 4, 6, 6))
-        pygame.draw.rect(self.image, BLACK, (18, 4, 6, 6))
-        pygame.draw.rect(self.image, (180, 20, 20), (0, 0, self.width, 4))
-        
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
+        self.rect = pygame.Rect(x, y, self.width, self.height)
         
         self.vel_x = 0
         self.vel_y = 0
         self.on_ground = False
         self.facing_right = True
+        self.can_double_jump = False
+        self.jumps_left = 2
+        
+        self.lives = 5
+        self.score = 0
+        self.alive = True
+        
+        self.has_weapon = True
+        self.weapon_type = 0
+        self.shoot_cooldown = 0
+        self.bullets = []
         
         self.anim_frame = 0
         self.anim_timer = 0
-        self.jump_pressed = False
-        
-        self.lives = 3
-        self.score = 0
-        self.alive = True
     
     def update(self, keys, tiles, platforms):
         if not self.alive:
@@ -105,13 +108,21 @@ class Player(pygame.sprite.Sprite):
         self.rect.x += self.vel_x
         self.handle_collision(tiles, horizontal=True)
         
-        if (keys[pygame.K_SPACE] or keys[pygame.K_w]) and self.on_ground and not self.jump_pressed:
-            self.vel_y = JUMP_FORCE
-            self.on_ground = False
-            self.jump_pressed = True
+        if (keys[pygame.K_SPACE] or keys[pygame.K_w]) and not getattr(self, 'jump_held', False):
+            if self.on_ground:
+                self.vel_y = JUMP_FORCE
+                self.on_ground = False
+                self.can_double_jump = True
+                self.jumps_left = 1
+            elif self.can_double_jump and self.jumps_left > 0:
+                self.vel_y = DOUBLE_JUMP_FORCE
+                self.jumps_left -= 1
+                self.can_double_jump = False
         
         if not (keys[pygame.K_SPACE] or keys[pygame.K_w]):
-            self.jump_pressed = False
+            self.jump_held = False
+        else:
+            self.jump_held = True
         
         self.vel_y += GRAVITY
         if self.vel_y > MAX_FALL_SPEED:
@@ -131,10 +142,25 @@ class Player(pygame.sprite.Sprite):
                     self.rect.top = platform.rect.bottom
                     self.vel_y = 0
         
+        if self.shoot_cooldown > 0:
+            self.shoot_cooldown -= 1
+        
+        for bullet in self.bullets[:]:
+            bullet.update()
+            if bullet.rect.right < 0 or bullet.rect.left > 4000:
+                self.bullets.remove(bullet)
+        
         self.anim_timer += 1
-        if self.anim_timer > 10:
+        if self.anim_timer > 8:
             self.anim_timer = 0
-            self.anim_frame = (self.anim_frame + 1) % 2
+            self.anim_frame = (self.anim_frame + 1) % 4
+    
+    def shoot(self):
+        if self.shoot_cooldown == 0 and self.has_weapon:
+            direction = 1 if self.facing_right else -1
+            bullet = Bullet(self.rect.centerx, self.rect.centery, direction)
+            self.bullets.append(bullet)
+            self.shoot_cooldown = 15
     
     def handle_collision(self, tiles, horizontal):
         for tile in tiles:
@@ -155,120 +181,103 @@ class Player(pygame.sprite.Sprite):
                             self.vel_y = 0
     
     def draw(self, surface, camera_x):
+        if not self.alive:
+            return
+        
         draw_x = self.rect.x - camera_x
-        img = self.image.copy()
+        draw_y = self.rect.y
+        
+        head_y = draw_y
+        body_y = draw_y + 12
+        leg_offset = 0
         
         if self.vel_x != 0 and self.on_ground:
-            if self.anim_frame == 0:
-                pygame.draw.rect(img, (200, 20, 20), (2, 10, 4, 8))
-            else:
-                pygame.draw.rect(img, (200, 20, 20), (2, 8, 4, 6))
+            leg_offset = [0, 3, 0, -3][self.anim_frame]
         
-        if not self.facing_right:
-            img = pygame.transform.flip(img, True, False)
+        pygame.draw.ellipse(surface, SKIN_COLOR, (draw_x + 4, head_y, 16, 12))
+        pygame.draw.ellipse(surface, HAIR_COLOR, (draw_x + 2, head_y - 2, 20, 8))
         
-        surface.blit(img, (draw_x, self.rect.y))
+        eye_x = draw_x + 14 if self.facing_right else draw_x + 6
+        pygame.draw.circle(surface, BLACK, (eye_x, head_y + 5), 2)
+        
+        pygame.draw.rect(surface, SHIRT_COLOR, (draw_x + 2, body_y, 20, 12))
+        pygame.draw.rect(surface, (40, 120, 200), (draw_x + 4, body_y + 2, 6, 8))
+        pygame.draw.rect(surface, (40, 120, 200), (draw_x + 14, body_y + 2, 6, 8))
+        
+        pygame.draw.rect(surface, PANTS_COLOR, (draw_x + 4, body_y + 12, 6, 8 + leg_offset))
+        pygame.draw.rect(surface, PANTS_COLOR, (draw_x + 14, body_y + 12, 6, 8 - leg_offset))
+        
+        pygame.draw.rect(surface, (100, 50, 50), (draw_x - 2, body_y + 2, 4, 10))
+        
+        for bullet in self.bullets:
+            bullet.draw(surface, camera_x)
 
 
-class Goomba(pygame.sprite.Sprite):
-    def __init__(self, x, y):
-        super().__init__()
+class Bullet:
+    def __init__(self, x, y, direction):
+        self.rect = pygame.Rect(x, y - 4, 12, 8)
+        self.direction = direction
+        self.speed = 10
+    
+    def update(self):
+        self.rect.x += self.speed * self.direction
+    
+    def draw(self, surface, camera_x):
+        pygame.draw.ellipse(surface, CRAZY_YELLOW, (self.rect.x - camera_x, self.rect.y, 12, 8))
+
+
+class Enemy:
+    def __init__(self, x, y, enemy_type=0):
+        self.type = enemy_type
         self.width = 28
         self.height = 28
-        self.image = pygame.Surface((self.width, self.height))
-        self.image.fill(ENEMY_BROWN)
-        pygame.draw.circle(self.image, WHITE, (8, 10), 4)
-        pygame.draw.circle(self.image, WHITE, (20, 10), 4)
-        pygame.draw.circle(self.image, BLACK, (8, 10), 2)
-        pygame.draw.circle(self.image, BLACK, (20, 10), 2)
-        pygame.draw.rect(self.image, (120, 70, 30), (4, 22, 8, 6))
-        pygame.draw.rect(self.image, (120, 70, 30), (16, 22, 8, 6))
         
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
+        if enemy_type == 0:
+            self.color = ENEMY_BROWN
+        elif enemy_type == 1:
+            self.color = ENEMY_GREEN
+        elif enemy_type == 2:
+            self.color = ENEMY_PURPLE
+        elif enemy_type == 3:
+            self.color = ENEMY_ORANGE
+        elif enemy_type == 4:
+            self.color = ENEMY_RED
+        else:
+            self.color = ENEMY_CYAN
+        
+        self.rect = pygame.Rect(x, y, self.width, self.height)
         self.vel_x = ENEMY_SPEED
         self.vel_y = 0
         self.direction = 1
         self.on_ground = False
         self.alive = True
-    
-    def update(self, tiles):
-        if not self.alive:
-            return
-        self.vel_y += GRAVITY
-        if self.vel_y > MAX_FALL_SPEED:
-            self.vel_y = MAX_FALL_SPEED
-        self.rect.x += self.vel_x * self.direction
-        self.handle_horizontal_collision(tiles)
-        self.rect.y += self.vel_y
-        self.on_ground = False
-        self.handle_vertical_collision(tiles)
-    
-    def handle_horizontal_collision(self, tiles):
-        for tile in tiles:
-            if tile.type in (TILE_GROUND, TILE_BLOCK, TILE_PIPE, TILE_PIPE_TOP):
-                if self.rect.colliderect(tile.rect):
-                    if self.vel_x * self.direction > 0:
-                        self.rect.right = tile.rect.left
-                    else:
-                        self.rect.left = tile.rect.right
-                    self.direction *= -1
-    
-    def handle_vertical_collision(self, tiles):
-        for tile in tiles:
-            if tile.type in (TILE_GROUND, TILE_BLOCK, TILE_PIPE, TILE_PIPE_TOP):
-                if self.rect.colliderect(tile.rect):
-                    if self.vel_y > 0:
-                        self.rect.bottom = tile.rect.top
-                        self.vel_y = 0
-                        self.on_ground = True
-                    elif self.vel_y < 0:
-                        self.rect.top = tile.rect.bottom
-                        self.vel_y = 0
-    
-    def draw(self, surface, camera_x):
-        if not self.alive:
-            return
-        surface.blit(self.image, (self.rect.x - camera_x, self.rect.y))
-
-
-class AngryGoomba(pygame.sprite.Sprite):
-    def __init__(self, x, y):
-        super().__init__()
-        self.width = 32
-        self.height = 32
-        self.image = pygame.Surface((self.width, self.height))
-        self.image.fill(ENEMY_PURPLE)
-        pygame.draw.circle(self.image, WHITE, (10, 12), 5)
-        pygame.draw.circle(self.image, WHITE, (24, 12), 5)
-        pygame.draw.line(self.image, ANGRY_RED, (6, 8), (14, 12), 3)
-        pygame.draw.line(self.image, ANGRY_RED, (18, 12), (26, 8), 3)
-        pygame.draw.circle(self.image, BLACK, (10, 12), 3)
-        pygame.draw.circle(self.image, BLACK, (24, 12), 3)
         
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
-        self.vel_x = ENEMY_SPEED * 1.5
-        self.vel_y = 0
-        self.direction = 1
-        self.on_ground = False
-        self.alive = True
         self.rage_timer = 0
+        self.spin_timer = 0
     
     def update(self, tiles):
         if not self.alive:
             return
-        self.rage_timer += 1
-        if self.rage_timer > 60:
-            self.vel_x = ENEMY_SPEED * 2.5
-            self.rage_timer = 0
+        
+        if self.type == 2:
+            self.rage_timer += 1
+            if self.rage_timer > 60:
+                self.vel_x = ENEMY_SPEED * 2.5
+                self.rage_timer = 0
+        
+        if self.type == 3:
+            self.spin_timer += 1
+            if self.spin_timer > 90:
+                self.spin_timer = 0
+                self.vel_x = ENEMY_SPEED * 3 if self.vel_x < ENEMY_SPEED * 2 else ENEMY_SPEED
+        
         self.vel_y += GRAVITY
         if self.vel_y > MAX_FALL_SPEED:
             self.vel_y = MAX_FALL_SPEED
+        
         self.rect.x += self.vel_x * self.direction
         self.handle_horizontal_collision(tiles)
+        
         self.rect.y += self.vel_y
         self.on_ground = False
         self.handle_vertical_collision(tiles)
@@ -298,179 +307,26 @@ class AngryGoomba(pygame.sprite.Sprite):
     def draw(self, surface, camera_x):
         if not self.alive:
             return
-        img = self.image.copy()
-        if self.rage_timer < 5:
-            pygame.draw.rect(img, ANGRY_RED, (0, 0, self.width, 4))
-        surface.blit(img, (self.rect.x - camera_x, self.rect.y))
-
-
-class CrazyKoopa(pygame.sprite.Sprite):
-    def __init__(self, x, y):
-        super().__init__()
-        self.width = 28
-        self.height = 40
-        self.image = pygame.Surface((self.width, self.height))
-        self.image.fill(ENEMY_ORANGE)
-        pygame.draw.circle(self.image, WHITE, (10, 10), 4)
-        pygame.draw.circle(self.image, WHITE, (20, 10), 4)
-        pygame.draw.circle(self.image, CRAZY_YELLOW, (10, 10), 2)
-        pygame.draw.circle(self.image, CRAZY_YELLOW, (20, 10), 2)
         
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
-        self.vel_x = ENEMY_SPEED * 0.8
-        self.vel_y = 0
-        self.direction = 1
-        self.on_ground = False
-        self.alive = True
-        self.spin_timer = 0
-        self.spinning = False
-    
-    def update(self, tiles):
-        if not self.alive:
-            return
-        self.spin_timer += 1
-        if self.spin_timer > 90:
-            self.spinning = not self.spinning
-            self.spin_timer = 0
-            self.vel_x = ENEMY_SPEED * 3 if self.spinning else ENEMY_SPEED * 0.8
-        self.vel_y += GRAVITY
-        if self.vel_y > MAX_FALL_SPEED:
-            self.vel_y = MAX_FALL_SPEED
-        self.rect.x += self.vel_x * self.direction
-        self.handle_horizontal_collision(tiles)
-        self.rect.y += self.vel_y
-        self.on_ground = False
-        self.handle_vertical_collision(tiles)
-    
-    def handle_horizontal_collision(self, tiles):
-        for tile in tiles:
-            if tile.type in (TILE_GROUND, TILE_BLOCK, TILE_PIPE, TILE_PIPE_TOP):
-                if self.rect.colliderect(tile.rect):
-                    if self.vel_x * self.direction > 0:
-                        self.rect.right = tile.rect.left
-                    else:
-                        self.rect.left = tile.rect.right
-                    if not self.spinning:
-                        self.direction *= -1
-    
-    def handle_vertical_collision(self, tiles):
-        for tile in tiles:
-            if tile.type in (TILE_GROUND, TILE_BLOCK, TILE_PIPE, TILE_PIPE_TOP):
-                if self.rect.colliderect(tile.rect):
-                    if self.vel_y > 0:
-                        self.rect.bottom = tile.rect.top
-                        self.vel_y = 0
-                        self.on_ground = True
-                    elif self.vel_y < 0:
-                        self.rect.top = tile.rect.bottom
-                        self.vel_y = 0
-    
-    def draw(self, surface, camera_x):
-        if not self.alive:
-            return
-        img = self.image.copy()
-        if self.spinning:
-            angle = (self.spin_timer * 30) % 360
-            img = pygame.transform.rotate(img, angle)
-        surface.blit(img, (self.rect.x - camera_x, self.rect.y))
+        draw_x = self.rect.x - camera_x
+        draw_y = self.rect.y
+        
+        pygame.draw.ellipse(surface, self.color, (draw_x, draw_y, self.width, self.height))
+        
+        eye_offset = 4 if self.direction > 0 else -4
+        pygame.draw.circle(surface, WHITE, (draw_x + 8 + eye_offset, draw_y + 8), 4)
+        pygame.draw.circle(surface, WHITE, (draw_x + 20 + eye_offset, draw_y + 8), 4)
+        pygame.draw.circle(surface, BLACK, (draw_x + 8 + eye_offset, draw_y + 8), 2)
+        pygame.draw.circle(surface, BLACK, (draw_x + 20 + eye_offset, draw_y + 8), 2)
+        
+        if self.type == 2:
+            pygame.draw.line(surface, ANGRY_RED, (draw_x + 4, draw_y + 4), (draw_x + 12, draw_y + 8), 2)
+            pygame.draw.line(surface, ANGRY_RED, (draw_x + 16, draw_y + 8), (draw_x + 24, draw_y + 4), 2)
 
 
-class Coin(pygame.sprite.Sprite):
+class Bat:
     def __init__(self, x, y):
-        super().__init__()
-        self.size = 20
-        self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
-        pygame.draw.circle(self.image, COIN_GOLD, (self.size//2, self.size//2), self.size//2)
-        pygame.draw.circle(self.image, (255, 240, 100), (self.size//2, self.size//2), self.size//2 - 3)
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
-        self.collected = False
-        self.anim_timer = 0
-    
-    def update(self):
-        self.anim_timer += 1
-    
-    def draw(self, surface, camera_x):
-        if self.collected:
-            return
-        offset = 0 if (self.anim_timer // 20) % 2 == 0 else -3
-        surface.blit(self.image, (self.rect.x - camera_x, self.rect.y + offset))
-
-
-class BananaPeel(pygame.sprite.Sprite):
-    def __init__(self, x, y):
-        super().__init__()
-        self.width = 24
-        self.height = 24
-        self.image = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-        pygame.draw.arc(self.image, CRAZY_YELLOW, (2, 8, 20, 16), 0, 3.14, 6)
-        pygame.draw.line(self.image, (200, 200, 100), (4, 16), (20, 16), 4)
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
-        self.collected = False
-        self.anim_timer = 0
-    
-    def update(self):
-        self.anim_timer += 1
-    
-    def draw(self, surface, camera_x):
-        if self.collected:
-            return
-        wobble = 0 if (self.anim_timer // 10) % 2 == 0 else -2
-        surface.blit(self.image, (self.rect.x - camera_x, self.rect.y + wobble))
-
-
-class Fruit(pygame.sprite.Sprite):
-    def __init__(self, x, y, fruit_type=0):
-        super().__init__()
-        self.size = 20
-        self.fruit_type = fruit_type
-        self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
-        if fruit_type == 0:
-            pygame.draw.circle(self.image, FRUIT_RED, (self.size//2, self.size//2), self.size//2)
-            pygame.draw.circle(self.image, WHITE, (self.size//2 - 3, self.size//2 - 3), 3)
-        elif fruit_type == 1:
-            pygame.draw.circle(self.image, FRUIT_ORANGE, (self.size//2, self.size//2), self.size//2)
-            pygame.draw.circle(self.image, (200, 100, 0), (self.size//2, self.size//2), 4)
-        else:
-            pygame.draw.circle(self.image, FRUIT_GREEN, (self.size//2, self.size//2), self.size//2)
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
-        self.collected = False
-        self.anim_timer = 0
-        self.start_y = y
-    
-    def update(self):
-        self.anim_timer += 1
-    
-    def draw(self, surface, camera_x):
-        if self.collected:
-            return
-        wobble = int(3 * (self.anim_timer % 30) / 15) - 3 if (self.anim_timer // 15) % 2 == 0 else 0
-        surface.blit(self.image, (self.rect.x - camera_x, self.start_y + wobble))
-
-
-class Bat(pygame.sprite.Sprite):
-    def __init__(self, x, y):
-        super().__init__()
-        self.width = 24
-        self.height = 20
-        self.image = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-        pygame.draw.circle(self.image, BAT_BLACK, (self.width//2, self.height//2), 6)
-        pygame.draw.polygon(self.image, BAT_BLACK, [(0, 0), (8, self.height//2), (0, self.height)])
-        pygame.draw.polygon(self.image, BAT_BLACK, [(self.width, 0), (self.width - 8, self.height//2), (self.width, self.height)])
-        pygame.draw.circle(self.image, WHITE, (self.width//2 - 3, self.height//2 - 2), 2)
-        pygame.draw.circle(self.image, WHITE, (self.width//2 + 3, self.height//2 - 2), 2)
-        pygame.draw.circle(self.image, BLACK, (self.width//2 - 3, self.height//2 - 2), 1)
-        pygame.draw.circle(self.image, BLACK, (self.width//2 + 3, self.height//2 - 2), 1)
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
+        self.rect = pygame.Rect(x, y, 24, 20)
         self.start_x = x
         self.start_y = y
         self.alive = True
@@ -491,19 +347,184 @@ class Bat(pygame.sprite.Sprite):
         if not self.alive:
             return
         draw_x = self.rect.x - camera_x
-        img = self.image.copy()
-        wing_offset = int(5 * abs(self.angle % 6.28 - 3.14) / 3.14) - 5
-        pygame.draw.polygon(img, BAT_BLACK, [(0, wing_offset), (8, self.height//2), (0, self.height - wing_offset)])
-        pygame.draw.polygon(img, BAT_BLACK, [(self.width, wing_offset), (self.width - 8, self.height//2), (self.width, self.height - wing_offset)])
-        surface.blit(img, (draw_x, self.rect.y))
+        pygame.draw.circle(surface, BAT_BLACK, (draw_x + 12, self.rect.y + 10), 8)
+        pygame.draw.polygon(surface, BAT_BLACK, [(draw_x, self.rect.y + 5), (draw_x + 10, self.rect.y + 10), (draw_x, self.rect.y + 15)])
+        pygame.draw.polygon(surface, BAT_BLACK, [(draw_x + 24, self.rect.y + 5), (draw_x + 14, self.rect.y + 10), (draw_x + 24, self.rect.y + 15)])
+        pygame.draw.circle(surface, WHITE, (draw_x + 10, self.rect.y + 8), 2)
+        pygame.draw.circle(surface, WHITE, (draw_x + 14, self.rect.y + 8), 2)
+
+
+class Boss:
+    def __init__(self, x, y, boss_type=0):
+        self.type = boss_type
+        self.width = 64
+        self.height = 80
+        self.rect = pygame.Rect(x, y, self.width, self.height)
+        self.vel_x = 2
+        self.vel_y = 0
+        self.health = 10
+        self.max_health = 10
+        self.alive = True
+        self.timer = 0
+        self.phase = 0
+        self.attacks = []
+        
+        if boss_type == 0:
+            self.name = "GOOMBA KING"
+            self.color = ENEMY_BROWN
+        elif boss_type == 1:
+            self.name = "KOOPA COMMANDER"
+            self.color = ENEMY_GREEN
+        elif boss_type == 2:
+            self.name = "DARK MASTER"
+            self.color = ENEMY_PURPLE
+        else:
+            self.name = "DRAGON"
+            self.color = ENEMY_RED
+    
+    def update(self, player_rect, tiles):
+        if not self.alive:
+            return
+        
+        self.timer += 1
+        
+        self.rect.x += self.vel_x
+        if self.rect.left < 100 or self.rect.right > 700:
+            self.vel_x *= -1
+        
+        if self.timer % 120 == 0:
+            self.phase = (self.phase + 1) % 3
+            
+            if self.phase == 1:
+                attack = Enemy(self.rect.centerx - 12, self.rect.bottom - 30, random.randint(0, 5))
+                self.attacks.append(attack)
+            
+            elif self.phase == 2:
+                for i in range(3):
+                    attack = Enemy(self.rect.centerx - 12, self.rect.top - 20, random.randint(0, 5))
+                    self.attacks.append(attack)
+        
+        for attack in self.attacks[:]:
+            attack.update(tiles)
+            if not attack.alive:
+                self.attacks.remove(attack)
+    
+    def take_damage(self):
+        self.health -= 1
+        if self.health <= 0:
+            self.alive = False
+    
+    def draw(self, surface, camera_x):
+        if not self.alive:
+            return
+        
+        draw_x = self.rect.x - camera_x
+        draw_y = self.rect.y
+        
+        pygame.draw.ellipse(surface, self.color, (draw_x, draw_y, self.width, self.height))
+        
+        pygame.draw.circle(surface, WHITE, (draw_x + 20, draw_y + 25), 8)
+        pygame.draw.circle(surface, WHITE, (draw_x + 44, draw_y + 25), 8)
+        pygame.draw.circle(surface, BLACK, (draw_x + 20, draw_y + 25), 4)
+        pygame.draw.circle(surface, BLACK, (draw_x + 44, draw_y + 25), 4)
+        
+        mouth_open = (self.timer // 30) % 2 == 0
+        if mouth_open:
+            pygame.draw.ellipse(surface, BLACK, (draw_x + 24, draw_y + 45, 16, 12))
+        else:
+            pygame.draw.line(surface, BLACK, (draw_x + 24, draw_y + 50), (draw_x + 40, draw_y + 50), 3)
+        
+        health_width = 60 * (self.health / self.max_health)
+        pygame.draw.rect(surface, (100, 0, 0), (draw_x, draw_y - 15, 64, 8))
+        pygame.draw.rect(surface, ANGRY_RED, (draw_x, draw_y - 15, health_width, 8))
+        
+        for attack in self.attacks:
+            attack.draw(surface, camera_x)
+
+
+class Coin:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 20, 20)
+        self.collected = False
+        self.anim_timer = 0
+    
+    def update(self):
+        self.anim_timer += 1
+    
+    def draw(self, surface, camera_x):
+        if self.collected:
+            return
+        offset = 0 if (self.anim_timer // 20) % 2 == 0 else -3
+        pygame.draw.circle(surface, COIN_GOLD, (self.rect.x - camera_x + 10, self.rect.y + offset + 10), 10)
+        pygame.draw.circle(surface, (255, 240, 100), (self.rect.x - camera_x + 10, self.rect.y + offset + 10), 7)
+
+
+class Fruit:
+    def __init__(self, x, y, fruit_type=0):
+        self.rect = pygame.Rect(x, y, 20, 20)
+        self.fruit_type = fruit_type
+        self.collected = False
+        self.anim_timer = 0
+        self.start_y = y
+    
+    def update(self):
+        self.anim_timer += 1
+    
+    def draw(self, surface, camera_x):
+        if self.collected:
+            return
+        wobble = int(3 * (self.anim_timer % 30) / 15) - 3 if (self.anim_timer // 15) % 2 == 0 else 0
+        colors = [(255, 50, 50), (255, 165, 0), (50, 205, 50)]
+        pygame.draw.circle(surface, colors[self.fruit_type], (self.rect.x - camera_x + 10, self.start_y + wobble + 10), 10)
+
+
+class SpikeTrap:
+    def __init__(self, x, y, trap_type=0):
+        self.rect = pygame.Rect(x, y, 32, 32)
+        self.trap_type = trap_type
+    
+    def draw(self, surface, camera_x):
+        if self.trap_type == 0:
+            for i in range(4):
+                offset = i * 8
+                points = [(self.rect.x - camera_x + offset, self.rect.y + 32),
+                         (self.rect.x - camera_x + offset + 4, self.rect.y),
+                         (self.rect.x - camera_x + offset + 8, self.rect.y + 32)]
+                pygame.draw.polygon(surface, SPIKE_GRAY, points)
+        elif self.trap_type == 1:
+            pygame.draw.circle(surface, TRAP_RED, (self.rect.x - camera_x + 16, self.rect.y + 16), 14)
+            pygame.draw.circle(surface, (50, 0, 0), (self.rect.x - camera_x + 16, self.rect.y + 16), 10)
+
+
+class FallingSpike:
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 24, 24)
+        self.start_y = y
+        self.falling = False
+        self.timer = 0
+    
+    def update(self):
+        self.timer += 1
+        if not self.falling and self.timer > 60:
+            self.falling = True
+        if self.falling:
+            self.rect.y += 8
+            if self.rect.y > SCREEN_HEIGHT + 100:
+                self.rect.y = self.start_y
+                self.falling = False
+                self.timer = 0
+    
+    def draw(self, surface, camera_x):
+        points = [(self.rect.x - camera_x, self.rect.y + 24),
+                 (self.rect.x - camera_x + 12, self.rect.y),
+                 (self.rect.x - camera_x + 24, self.rect.y + 24)]
+        pygame.draw.polygon(surface, TRAP_RED, points)
 
 
 class MovingPlatform:
-    def __init__(self, x, y, width=3):
+    def __init__(self, x, y, width=3, horizontal=True):
         self.rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, width * TILE_SIZE, TILE_SIZE // 2)
         self.start_x = self.rect.x
-        self.start_y = self.rect.y
-        self.type = TILE_PLATFORM_MOVING
         self.direction = 1
         self.speed = 2
         self.move_distance = 64
@@ -514,76 +535,8 @@ class MovingPlatform:
             self.direction *= -1
     
     def draw(self, surface, camera_x):
-        draw_x = self.rect.x - camera_x
-        pygame.draw.rect(surface, PLATFORM_BLUE, (draw_x, self.rect.y, self.rect.width, self.rect.height))
-        pygame.draw.rect(surface, (100, 150, 200), (draw_x, self.rect.y, self.rect.width, 4))
-        pygame.draw.circle(surface, (150, 180, 220), (draw_x + 8, self.rect.y + self.rect.height // 2), 4)
-        pygame.draw.circle(surface, (150, 180, 220), (draw_x + self.rect.width - 8, self.rect.y + self.rect.height // 2), 4)
-
-
-class SpikeTrap(pygame.sprite.Sprite):
-    def __init__(self, x, y, trap_type=0):
-        super().__init__()
-        self.trap_type = trap_type
-        self.width = 32
-        self.height = 32
-        self.image = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-        
-        if trap_type == 0:
-            for i in range(4):
-                offset = i * 8
-                pygame.draw.polygon(self.image, SPIKE_GRAY, [(offset, self.height), (offset + 4, 0), (offset + 8, self.height)])
-        elif trap_type == 1:
-            pygame.draw.circle(self.image, TRAP_RED, (self.width//2, self.height//2), 14)
-            pygame.draw.circle(self.image, TRAP_DARK, (self.width//2, self.height//2), 10)
-            pygame.draw.circle(self.image, ANGRY_RED, (self.width//2, self.height//2), 6)
-        else:
-            pygame.draw.circle(self.image, TRAP_ORANGE, (self.width//2, self.height//2), 14)
-            pygame.draw.line(self.image, TRAP_DARK, (4, 4), (self.width-4, self.height-4), 3)
-            pygame.draw.line(self.image, TRAP_DARK, (self.width-4, 4), (4, self.height-4), 3)
-        
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
-        self.timer = 0
-    
-    def update(self):
-        self.timer += 1
-    
-    def draw(self, surface, camera_x):
-        surface.blit(self.image, (self.rect.x - camera_x, self.rect.y))
-
-
-class FallingSpike(pygame.sprite.Sprite):
-    def __init__(self, x, y):
-        super().__init__()
-        self.width = 24
-        self.height = 24
-        self.image = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-        pygame.draw.polygon(self.image, TRAP_RED, [(0, self.height), (self.width//2, 0), (self.width, self.height)])
-        self.rect = self.image.get_rect()
-        self.rect.x = x
-        self.rect.y = y
-        self.start_y = y
-        self.falling = False
-        self.timer = 0
-        self.triggered = False
-    
-    def update(self):
-        self.timer += 1
-        if not self.triggered and self.timer > 60:
-            self.triggered = True
-            self.falling = True
-        if self.falling:
-            self.rect.y += 8
-            if self.rect.y > SCREEN_HEIGHT + 100:
-                self.rect.y = self.start_y
-                self.falling = False
-                self.triggered = False
-                self.timer = 0
-    
-    def draw(self, surface, camera_x):
-        surface.blit(self.image, (self.rect.x - camera_x, self.rect.y))
+        pygame.draw.rect(surface, PLATFORM_BLUE, (self.rect.x - camera_x, self.rect.y, self.rect.width, self.rect.height))
+        pygame.draw.rect(surface, (100, 150, 200), (self.rect.x - camera_x, self.rect.y, self.rect.width, 4))
 
 
 class Tile:
@@ -602,149 +555,114 @@ class Tile:
         elif self.type == TILE_BLOCK:
             pygame.draw.rect(surface, BRICK_COLOR, (draw_x, self.rect.y, TILE_SIZE, TILE_SIZE))
             pygame.draw.rect(surface, (150, 100, 70), (draw_x, self.rect.y, TILE_SIZE, 2))
-            pygame.draw.line(surface, BLACK, (draw_x, self.rect.y + TILE_SIZE//2), (draw_x + TILE_SIZE, self.rect.y + TILE_SIZE//2), 1)
         elif self.type == TILE_PIPE:
             pygame.draw.rect(surface, PIPE_GREEN, (draw_x, self.rect.y, TILE_SIZE, TILE_SIZE))
-            pygame.draw.rect(surface, (20, 130, 50), (draw_x + 4, self.rect.y + 4, TILE_SIZE - 8, TILE_SIZE - 4))
         elif self.type == TILE_PIPE_TOP:
-            pygame.draw.rect(surface, PIPE_GREEN, (draw_x, self.rect.y, TILE_SIZE, TILE_SIZE//2))
-            pygame.draw.rect(surface, (20, 130, 50), (draw_x + 4, self.rect.y + 4, TILE_SIZE - 8, TILE_SIZE//2 - 4))
+            pygame.draw.rect(surface, PIPE_GREEN, (draw_x, self.rect.y, TILE_SIZE, TILE_SIZE // 2))
         elif self.type == TILE_SPIKE:
-            points = [(draw_x, self.rect.y + TILE_SIZE), (draw_x + TILE_SIZE // 2, self.rect.y), (draw_x + TILE_SIZE, self.rect.y + TILE_SIZE)]
+            points = [(draw_x, self.rect.y + TILE_SIZE), (draw_x + 16, self.rect.y), (draw_x + 32, self.rect.y + TILE_SIZE)]
             pygame.draw.polygon(surface, SPIKE_GRAY, points)
         elif self.type == TILE_SPIKE_UP:
-            points = [(draw_x, self.rect.y), (draw_x + TILE_SIZE // 2, self.rect.y + TILE_SIZE), (draw_x + TILE_SIZE, self.rect.y)]
+            points = [(draw_x, self.rect.y), (draw_x + 16, self.rect.y + TILE_SIZE), (draw_x + 32, self.rect.y)]
             pygame.draw.polygon(surface, ANGRY_RED, points)
         elif self.type == TILE_FLAG:
             pygame.draw.rect(surface, FLAG_POLE, (draw_x + 14, self.rect.y, 4, TILE_SIZE))
             pygame.draw.polygon(surface, FLAG_RED, [(draw_x + 18, self.rect.y), (draw_x + 30, self.rect.y + 8), (draw_x + 18, self.rect.y + 16)])
+        elif self.type == TILE_BOSS_DOOR:
+            pygame.draw.rect(surface, BOSS_DARK, (draw_x, self.rect.y, TILE_SIZE, TILE_SIZE))
+            pygame.draw.rect(surface, TRAP_RED, (draw_x + 8, self.rect.y + 8, 16, 16))
 
 
-def generate_random_level(level_num, width_tiles=60):
+def generate_level(level_num, width_tiles=60, is_boss_level=False):
     level_width = width_tiles
     ground_row = 14
     map_data = [[0] * level_width for _ in range(18)]
     
-    sky_color = [(107, 140, 255), (100, 130, 230), (80, 100, 200)][(level_num - 1) % 3]
+    sky_color = [(107, 140, 255), (100, 130, 230), (80, 100, 200), (60, 60, 80), (80, 60, 60)][(level_num - 1) % 5]
     
     for col in range(level_width):
         map_data[ground_row][col] = TILE_GROUND
         map_data[ground_row + 1][col] = TILE_GROUND
     
-    segment_width = (level_width - 10) // 5
-    for seg in range(5):
-        seg_start = 3 + seg * segment_width
-        pit_col = seg_start + random.randint(2, segment_width - 2)
-        pit_width = random.randint(1, 2)
-        for p in range(pit_width):
-            if pit_col + p < level_width - 3:
-                map_data[ground_row][pit_col + p] = TILE_EMPTY
-                map_data[ground_row + 1][pit_col + p] = TILE_EMPTY
+    if not is_boss_level:
+        for seg in range(5):
+            seg_start = 3 + seg * ((level_width - 10) // 5)
+            pit_col = seg_start + random.randint(2, 6)
+            pit_width = random.randint(1, 2)
+            for p in range(pit_width):
+                if pit_col + p < level_width - 3:
+                    map_data[ground_row][pit_col + p] = TILE_EMPTY
+                    map_data[ground_row + 1][pit_col + p] = TILE_EMPTY
     
-    pipe_positions = []
-    for _ in range(4 + level_num):
+    for _ in range(3 + level_num):
         pipe_col = random.randint(8, level_width - 8)
-        pipe_height = random.randint(1, 2) if level_num == 1 else random.randint(2, 3)
-        if level_num >= 2 and random.random() < 0.3:
-            pipe_height = 4
-        pipe_positions.append((pipe_col, pipe_height))
-    
-    for pipe_col, pipe_height in pipe_positions:
+        pipe_height = random.randint(2, 3)
         for h in range(pipe_height):
             if ground_row - h >= 0:
-                if h == 0:
-                    map_data[ground_row - h][pipe_col] = TILE_PIPE_TOP
-                else:
-                    map_data[ground_row - h][pipe_col] = TILE_PIPE
+                map_data[ground_row - h][pipe_col] = TILE_PIPE_TOP if h == 0 else TILE_PIPE
     
     for _ in range(6 + level_num * 2):
         plat_col = random.randint(4, level_width - 6)
-        plat_width = random.randint(2, 3)
         plat_row = random.randint(9, 12)
-        for w in range(plat_width):
-            if plat_col + w < level_width - 3:
-                if map_data[plat_row][plat_col + w] == 0:
-                    map_data[plat_row][plat_col + w] = TILE_BLOCK
+        for w in range(random.randint(2, 3)):
+            if plat_col + w < level_width - 3 and map_data[plat_row][plat_col + w] == 0:
+                map_data[plat_row][plat_col + w] = TILE_BLOCK
     
     for col in range(4, level_width - 4):
-        if random.random() < 0.08 and map_data[ground_row][col] == TILE_GROUND:
-            has_pipe = any(abs(col - pc) <= 1 for pc, _ in pipe_positions)
-            if not has_pipe and col > 3:
-                map_data[ground_row][col] = TILE_SPIKE_UP
+        if random.random() < 0.06 and map_data[ground_row][col] == TILE_GROUND:
+            map_data[ground_row][col] = TILE_SPIKE_UP
     
     coin_positions = []
     for _ in range(10 + level_num * 2):
-        coin_col = random.randint(2, level_width - 3)
-        coin_row = random.randint(11, 13)
-        coin_positions.append((coin_col, coin_row))
+        coin_positions.append((random.randint(2, level_width - 3), random.randint(11, 13)))
     
     enemy_positions = []
-    for _ in range(6 + level_num * 2):
-        valid = False
-        attempts = 0
-        while not valid and attempts < 20:
-            enemy_col = random.randint(5, level_width - 5)
-            enemy_row = ground_row - 1
-            if map_data[ground_row][enemy_col] != TILE_EMPTY:
-                valid = True
-                enemy_positions.append((enemy_col, enemy_row))
-            attempts += 1
-        if not valid:
-            enemy_positions.append((random.randint(8, level_width - 8), ground_row - 1))
-    
-    banana_peels = []
-    for _ in range(random.randint(2, 5)):
-        peel_col = random.randint(4, level_width - 4)
-        if map_data[ground_row][peel_col] == TILE_GROUND:
-            banana_peels.append((peel_col, ground_row - 1))
-    
-    fruit_positions = []
-    for _ in range(random.randint(3, 6)):
-        fruit_col = random.randint(5, level_width - 5)
-        fruit_row = random.randint(4, 10)
-        if map_data[fruit_row][fruit_col] == 0:
-            fruit_positions.append((fruit_col, fruit_row, random.randint(0, 2)))
+    for _ in range(5 + level_num * 2):
+        enemy_col = random.randint(5, level_width - 5)
+        if map_data[ground_row][enemy_col] == TILE_GROUND:
+            enemy_positions.append((enemy_col, ground_row - 1, random.randint(0, 5)))
     
     bat_positions = []
-    for _ in range(random.randint(1, 3)):
+    for _ in range(1 + level_num // 2):
         bat_positions.append((random.randint(10, level_width - 15) * TILE_SIZE, random.randint(3, 7) * TILE_SIZE))
     
     moving_platforms = []
-    for _ in range(random.randint(2, 4)):
+    for _ in range(2 + level_num // 2):
         moving_platforms.append((random.randint(8, level_width - 10), random.randint(7, 11), random.randint(2, 3)))
     
     trap_positions = []
-    for _ in range(random.randint(3, 6 + level_num)):
+    for _ in range(2 + level_num):
         trap_col = random.randint(6, level_width - 6)
         trap_row = random.randint(3, 12)
-        trap_positions.append((trap_col * TILE_SIZE, trap_row * TILE_SIZE, random.randint(0, 2)))
+        trap_positions.append((trap_col * TILE_SIZE, trap_row * TILE_SIZE, random.randint(0, 1)))
     
     falling_spikes = []
-    for _ in range(random.randint(2, 4 + level_num)):
-        fall_col = random.randint(8, level_width - 8)
-        falling_spikes.append((fall_col * TILE_SIZE, -50))
+    for _ in range(1 + level_num):
+        falling_spikes.append((random.randint(8, level_width - 8) * TILE_SIZE, -50))
+    
+    boss_door_x = level_width - 3
     
     return {
-        "name": f"Level {level_num}",
+        "name": f"Level {level_num}" + (" - BOSS!" if is_boss_level else ""),
         "sky_color": sky_color,
         "map": map_data,
         "coins": coin_positions,
         "enemies": enemy_positions,
-        "banana_peels": banana_peels,
-        "fruits": fruit_positions,
         "bats": bat_positions,
         "moving_platforms": moving_platforms,
         "traps": trap_positions,
         "falling_spikes": falling_spikes,
-        "flag_x": level_width - 3,
+        "boss_door_x": boss_door_x,
+        "is_boss_level": is_boss_level,
+        "boss_type": (level_num - 1) // 3 if is_boss_level else None,
     }
 
 
-LEVELS = {
-    1: generate_random_level(1, 60),
-    2: generate_random_level(2, 80),
-    3: generate_random_level(3, 100),
-}
+LEVELS = {}
+for i in range(1, 11):
+    is_boss = (i % 3) == 0
+    width = 50 + i * 10
+    LEVELS[i] = generate_level(i, width, is_boss)
 
 
 class Level:
@@ -757,12 +675,11 @@ class Level:
         self.tiles = []
         self.coins = []
         self.enemies = []
-        self.fruits = []
         self.bats = []
         self.moving_platforms = []
         self.traps = []
         self.falling_spikes = []
-        self.flag_x = self.data["flag_x"] * TILE_SIZE
+        self.boss = None
         
         self.load_level()
     
@@ -779,11 +696,8 @@ class Level:
         for x, y in self.data["coins"]:
             self.coins.append(Coin(x * TILE_SIZE, y * TILE_SIZE))
         
-        for x, y in self.data.get("banana_peels", []):
-            self.coins.append(BananaPeel(x * TILE_SIZE, y * TILE_SIZE))
-        
-        for x, y, ftype in self.data.get("fruits", []):
-            self.fruits.append(Fruit(x * TILE_SIZE, y * TILE_SIZE, ftype))
+        for x, y, etype in self.data["enemies"]:
+            self.enemies.append(Enemy(x * TILE_SIZE, y * TILE_SIZE, etype))
         
         for x, y in self.data.get("bats", []):
             self.bats.append(Bat(x, y))
@@ -797,32 +711,24 @@ class Level:
         for x, y in self.data.get("falling_spikes", []):
             self.falling_spikes.append(FallingSpike(x, y))
         
-        for x, y in self.data["enemies"]:
-            enemy_type = random.randint(1, 10 + self.level_num * 2)
-            if enemy_type <= 3:
-                self.enemies.append(Goomba(x * TILE_SIZE, y * TILE_SIZE))
-            elif enemy_type <= 5:
-                self.enemies.append(AngryGoomba(x * TILE_SIZE, y * TILE_SIZE))
-            else:
-                self.enemies.append(CrazyKoopa(x * TILE_SIZE, y * TILE_SIZE))
-        
-        self.flag_x = self.data["flag_x"] * TILE_SIZE
+        if self.data.get("is_boss_level") and self.data.get("boss_type") is not None:
+            self.boss = Boss(500, 10 * TILE_SIZE - 80, self.data["boss_type"])
     
     def update(self):
         for coin in self.coins:
             coin.update()
-        for fruit in self.fruits:
-            fruit.update()
+        for enemy in self.enemies:
+            enemy.update(self.tile_rects)
         for bat in self.bats:
             bat.update()
         for platform in self.moving_platforms:
             platform.update()
         for trap in self.traps:
-            trap.update()
+            pass
         for spike in self.falling_spikes:
             spike.update()
-        for enemy in self.enemies:
-            enemy.update(self.tile_rects)
+        if self.boss and self.boss.alive:
+            self.boss.update(self.tile_rects[0].rect if self.tile_rects else None, self.tile_rects)
     
     def draw(self, surface, camera_x):
         for tile in self.tiles:
@@ -833,9 +739,6 @@ class Level:
         
         for coin in self.coins:
             coin.draw(surface, camera_x)
-        
-        for fruit in self.fruits:
-            fruit.draw(surface, camera_x)
         
         for bat in self.bats:
             bat.draw(surface, camera_x)
@@ -849,10 +752,8 @@ class Level:
         for enemy in self.enemies:
             enemy.draw(surface, camera_x)
         
-        draw_flag_x = self.flag_x - camera_x
-        if 0 < draw_flag_x < SCREEN_WIDTH:
-            pygame.draw.rect(surface, FLAG_POLE, (draw_flag_x + 14, 10 * TILE_SIZE, 4, 6 * TILE_SIZE))
-            pygame.draw.polygon(surface, FLAG_RED, [(draw_flag_x + 18, 10 * TILE_SIZE), (draw_flag_x + 40, 10 * TILE_SIZE + 12), (draw_flag_x + 18, 10 * TILE_SIZE + 24)])
+        if self.boss:
+            self.boss.draw(surface, camera_x)
 
 
 class MusicPlayer:
@@ -878,10 +779,10 @@ class MusicPlayer:
         if not self.available:
             return
         try:
-            for freq in [200, 300, 400]:
-                sound = self._generate_tone(freq, 0.05, 0.2)
+            for freq in [250, 350, 450]:
+                sound = self._generate_tone(freq, 0.06, 0.25)
                 pygame.mixer.Sound.play(sound)
-                pygame.time.wait(30)
+                pygame.time.wait(40)
         except:
             pass
     
@@ -896,11 +797,29 @@ class MusicPlayer:
         except:
             pass
     
-    def play_enemy_stomp(self):
+    def play_shoot(self):
         if not self.available:
             return
         try:
-            for freq in [300, 200, 150]:
+            sound = self._generate_tone(800, 0.05, 0.2)
+            pygame.mixer.Sound.play(sound)
+        except:
+            pass
+    
+    def play_hit(self):
+        if not self.available:
+            return
+        try:
+            sound = self._generate_tone(150, 0.15, 0.4)
+            pygame.mixer.Sound.play(sound)
+        except:
+            pass
+    
+    def play_boss_hit(self):
+        if not self.available:
+            return
+        try:
+            for freq in [400, 300, 200]:
                 sound = self._generate_tone(freq, 0.1, 0.3)
                 pygame.mixer.Sound.play(sound)
                 pygame.time.wait(80)
@@ -911,34 +830,10 @@ class MusicPlayer:
         if not self.available:
             return
         try:
-            for freq in [400, 350, 300, 250, 200]:
-                sound = self._generate_tone(freq, 0.15, 0.3)
+            for freq in [400, 350, 300, 250, 200, 150]:
+                sound = self._generate_tone(freq, 0.12, 0.3)
                 pygame.mixer.Sound.play(sound)
-                pygame.time.wait(100)
-        except:
-            pass
-    
-    def play_level_complete(self):
-        if not self.available:
-            return
-        try:
-            notes = [523, 587, 659, 698, 784, 880, 988, 1047]
-            for freq in notes:
-                sound = self._generate_tone(freq, 0.15, 0.25)
-                pygame.mixer.Sound.play(sound)
-                pygame.time.wait(120)
-        except:
-            pass
-    
-    def play_game_over(self):
-        if not self.available:
-            return
-        try:
-            notes = [400, 350, 300, 250, 200, 150]
-            for freq in notes:
-                sound = self._generate_tone(freq, 0.2, 0.3)
-                pygame.mixer.Sound.play(sound)
-                pygame.time.wait(150)
+                pygame.time.wait(80)
         except:
             pass
     
@@ -946,11 +841,11 @@ class MusicPlayer:
         if not self.available:
             return
         try:
-            notes = [523, 659, 784, 1047, 784, 659, 523]
+            notes = [523, 659, 784, 1047, 784, 659, 523, 659, 784, 1047]
             for freq in notes:
-                sound = self._generate_tone(freq, 0.2, 0.25)
+                sound = self._generate_tone(freq, 0.18, 0.25)
                 pygame.mixer.Sound.play(sound)
-                pygame.time.wait(150)
+                pygame.time.wait(140)
         except:
             pass
 
@@ -959,52 +854,54 @@ class Game:
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("I Wanna Be The Guy - Platformer!")
+        pygame.display.set_caption("SUPAR MAYRO - Ultimate Platformer!")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 36)
         self.large_font = pygame.font.Font(None, 72)
         self.small_font = pygame.font.Font(None, 24)
         
         self.current_level = 1
-        self.max_levels = 3
+        self.max_levels = 10
         
         self.music = MusicPlayer()
         
         self.reset_game()
     
     def reset_game(self):
+        if self.current_level not in LEVELS:
+            LEVELS[self.current_level] = generate_level(self.current_level, 50 + self.current_level * 10, (self.current_level % 3) == 0)
+        
         self.level = Level(self.current_level)
         self.player = Player(100, 10 * TILE_SIZE)
         self.camera_x = 0
         self.state = STATE_PLAYING
         self.level_width = len(self.level.data["map"][0]) * TILE_SIZE
     
-    def reset_full_game(self):
-        global LEVELS
-        LEVELS = {
-            1: generate_random_level(1, 60),
-            2: generate_random_level(2, 80),
-            3: generate_random_level(3, 100),
-        }
-        self.current_level = 1
-        self.reset_game()
-    
     def next_level(self):
         if self.current_level < self.max_levels:
             self.current_level += 1
-            LEVELS[self.current_level] = generate_random_level(self.current_level, 60 + (self.current_level - 1) * 20)
             self.reset_game()
-            self.music.play_level_complete()
         else:
             self.state = STATE_WIN
             self.music.play_win()
     
     def update(self):
+        if self.state == STATE_BOSS:
+            self.update_boss()
+            return
+        
         if self.state != STATE_PLAYING:
             return
         
         keys = pygame.key.get_pressed()
         
+        if keys[pygame.K_z] or keys[pygame.K_x]:
+            self.player.shoot()
+            if not getattr(self, 'shoot_key_held', False):
+                self.music.play_shoot()
+                self.shoot_key_held = True
+        else:
+            self.shoot_key_held = False        
         self.player.update(keys, self.level.tile_rects, self.level.moving_platforms)
         
         target_camera_x = self.player.rect.x - SCREEN_WIDTH // 3
@@ -1015,13 +912,7 @@ class Game:
         for coin in self.level.coins:
             if not coin.collected and self.player.rect.colliderect(coin.rect):
                 coin.collected = True
-                self.player.score += 50 if not hasattr(coin, 'anim_timer') else 100
-                self.music.play_coin()
-        
-        for fruit in self.level.fruits:
-            if not fruit.collected and self.player.rect.colliderect(fruit.rect):
-                fruit.collected = True
-                self.player.score += 150
+                self.player.score += 100
                 self.music.play_coin()
         
         for enemy in self.level.enemies:
@@ -1032,7 +923,7 @@ class Game:
                     enemy.alive = False
                     self.player.vel_y = JUMP_FORCE // 2
                     self.player.score += 200
-                    self.music.play_enemy_stomp()
+                    self.music.play_hit()
                 else:
                     self.player_died()
         
@@ -1042,9 +933,34 @@ class Game:
                     bat.alive = False
                     self.player.vel_y = JUMP_FORCE // 2
                     self.player.score += 250
-                    self.music.play_enemy_stomp()
+                    self.music.play_hit()
                 else:
                     self.player_died()
+        
+        for bullet in self.player.bullets[:]:
+            for enemy in self.level.enemies:
+                if enemy.alive and bullet.rect.colliderect(enemy.rect):
+                    enemy.alive = False
+                    self.player.score += 200
+                    self.music.play_hit()
+                    if bullet in self.player.bullets:
+                        self.player.bullets.remove(bullet)
+            
+            if self.level.boss and self.level.boss.alive and bullet.rect.colliderect(self.level.boss.rect):
+                self.level.boss.take_damage()
+                self.player.score += 100
+                self.music.play_boss_hit()
+                if bullet in self.player.bullets:
+                    self.player.bullets.remove(bullet)
+        
+        if self.level.boss and self.level.boss.alive:
+            if self.player.rect.colliderect(self.level.boss.rect):
+                self.player_died()
+            
+            if not self.level.boss.alive:
+                self.player.score += 5000
+                self.music.play_win()
+                self.next_level()
         
         for tile in self.level.tiles:
             if tile.type in (TILE_SPIKE, TILE_SPIKE_UP) and self.player.rect.colliderect(tile.rect):
@@ -1061,22 +977,61 @@ class Game:
         if self.player.rect.y > SCREEN_HEIGHT:
             self.player_died()
         
-        if self.player.rect.x >= self.level.flag_x:
-            self.player.score += 1000
-            self.next_level()
+        boss_door_x = self.level.data.get("boss_door_x", 0) * TILE_SIZE
+        if self.player.rect.x >= boss_door_x:
+            if self.level.data.get("is_boss_level"):
+                self.state = STATE_BOSS
+            else:
+                self.player.score += 1000
+                self.next_level()
+    
+    def update_boss(self):
+        keys = pygame.key.get_pressed()
+        
+        if keys[pygame.K_z] or keys[pygame.K_x]:
+            self.player.shoot()
+        
+        self.player.update(keys, self.level.tile_rects, [])
+        
+        self.level.update()
+        
+        for bullet in self.player.bullets[:]:
+            for enemy in self.level.boss.attacks:
+                if enemy.alive and bullet.rect.colliderect(enemy.rect):
+                    enemy.alive = False
+                    if bullet in self.player.bullets:
+                        self.player.bullets.remove(bullet)
+        
+        if self.player.rect.colliderect(self.level.boss.rect):
+            self.player_died()
+        
+        for enemy in self.level.boss.attacks:
+            if enemy.alive and self.player.rect.colliderect(enemy.rect):
+                self.player_died()
+        
+        for bullet in self.player.bullets[:]:
+            if bullet.rect.colliderect(self.level.boss.rect):
+                self.level.boss.take_damage()
+                self.music.play_boss_hit()
+                if bullet in self.player.bullets:
+                    self.player.bullets.remove(bullet)
+        
+        if self.player.rect.y > SCREEN_HEIGHT:
+            self.player_died()
     
     def player_died(self):
         self.music.play_death()
         self.player.lives -= 1
         if self.player.lives <= 0:
             self.state = STATE_GAME_OVER
-            self.music.play_game_over()
         else:
             self.player.rect.x = 100
             self.player.rect.y = 10 * TILE_SIZE
             self.player.vel_x = 0
             self.player.vel_y = 0
             self.camera_x = 0
+            if self.state == STATE_BOSS:
+                self.level.boss = Boss(500, 10 * TILE_SIZE - 80, self.level.data.get("boss_type", 0))
     
     def draw(self):
         self.screen.fill(self.level.sky_color)
@@ -1091,9 +1046,13 @@ class Game:
         
         self.screen.blit(score_text, (10, 10))
         self.screen.blit(lives_text, (SCREEN_WIDTH - 120, 10))
-        self.screen.blit(level_text, (SCREEN_WIDTH // 2 - 100, 10))
+        self.screen.blit(level_text, (SCREEN_WIDTH // 2 - 120, 10))
         
-        controls_text = self.small_font.render("ARROWS: Move | SPACE: Jump | P: Pause | R: Restart", True, BLACK)
+        if self.state == STATE_BOSS and self.level.boss:
+            boss_text = self.large_font.render(self.level.boss.name, True, TRAP_RED)
+            self.screen.blit(boss_text, (SCREEN_WIDTH // 2 - 150, 50))
+        
+        controls_text = self.small_font.render("ARROWS: Move | SPACE: Jump | Z/X: Shoot | P: Pause", True, BLACK)
         self.screen.blit(controls_text, (10, SCREEN_HEIGHT - 30))
         
         if self.state == STATE_PAUSED:
@@ -1101,9 +1060,7 @@ class Game:
             overlay.fill((0, 0, 0, 128))
             self.screen.blit(overlay, (0, 0))
             text = self.large_font.render("PAUSED", True, WHITE)
-            self.screen.blit(text, text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 30)))
-            resume_text = self.font.render("Press P to Resume", True, WHITE)
-            self.screen.blit(resume_text, resume_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 30)))
+            self.screen.blit(text, text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2)))
         
         elif self.state == STATE_GAME_OVER:
             overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -1122,14 +1079,11 @@ class Game:
             self.screen.blit(text, text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 - 20)))
             score_text = self.font.render(f"Final Score: {self.player.score}", True, WHITE)
             self.screen.blit(score_text, score_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 30)))
-            restart_text = self.font.render("Press R to Play Again", True, WHITE)
-            self.screen.blit(restart_text, restart_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2 + 70)))
         
         pygame.display.flip()
     
     def run(self):
         running = True
-        space_pressed = False
         
         while running:
             for event in pygame.event.get():
@@ -1141,15 +1095,11 @@ class Game:
                     elif event.key == pygame.K_p and self.state == STATE_PAUSED:
                         self.state = STATE_PLAYING
                     elif event.key == pygame.K_r and self.state in (STATE_GAME_OVER, STATE_WIN):
-                        self.reset_full_game()
-                    elif event.key in (pygame.K_SPACE, pygame.K_w):
-                        if self.state == STATE_PLAYING and self.player.on_ground and not space_pressed:
+                        self.current_level = 1
+                        self.reset_game()
+                    elif event.key == pygame.K_SPACE or event.key == pygame.K_w:
+                        if self.state == STATE_PLAYING and self.player.on_ground:
                             self.music.play_jump()
-                            space_pressed = True
-            
-            if event.type == pygame.KEYUP:
-                if event.key in (pygame.K_SPACE, pygame.K_w):
-                    space_pressed = False
             
             self.update()
             self.draw()
